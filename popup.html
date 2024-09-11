@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Image Translator</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 10px;
+      }
+      button {
+        margin-top: 10px;
+        padding: 5px 10px;
+      }
+      #errorLog {
+        color: red;
+        margin-top: 10px;
+      }
+      .form-group {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .form-group select, .form-group input {
+        margin-right: 10px;
+        padding: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Image Translator</h2>
+
+    <!-- ช่องสำหรับใส่ API Key -->
+    <label for="apiKeyInput">Enter API Key:</label>
+    <input type="text" id="apiKeyInput" placeholder="Enter your API key here" />
+
+    <!-- ช่องสำหรับกรอก class -->
+    <label for="classInput">Enter class to find images:</label>
+    <input type="text" id="classInput" placeholder="e.g. ts-main-image curdown" />
+
+    <!-- Dropdown สำหรับเลือกภาษา -->
+    <div class="form-group">
+      <label for="languageSelect">Select language:</label>
+      <select id="languageSelect">
+        <option value="th">Thai</option>
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <!-- เพิ่มภาษาอื่นๆ ได้ที่นี่ -->
+      </select>
+    </div>
+
+    <!-- ปุ่มแปลภาพ -->
+    <button id="translateBtn">Translate Images</button>
+
+    <!-- แสดงข้อความ error -->
+    <p id="errorLog">Error Log: <span id="errorMessage">None</span></p>
+
+    <!-- โหลด Tesseract.js จาก CDN -->
+    <script src="popup.js"></script>
+  </body>
+</html>
