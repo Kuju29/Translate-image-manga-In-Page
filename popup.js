@@ -26,271 +26,350 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.storage.local.set({ savedClass: savedClass });
   });
 
-  document.getElementById("translateBtn").addEventListener("click", () => {
-    const className = document.getElementById("classInput").value;
-    const targetLang = document.getElementById("languageSelect").value;
+  document
+    .getElementById("translateBtn")
+    .addEventListener("click", async () => {
+      logProcess("Starting translation process...");
+      const className = document.getElementById("classInput").value;
+      const targetLang = document.getElementById("languageSelect").value;
 
-    if (!apiKey) {
-      logError("API Key is missing.");
-      return;
-    }
+      if (!apiKey) {
+        logError("API Key is missing.");
+        return;
+      }
 
-    if (!className) {
-      logError("Class is missing.");
-      return;
-    }
+      if (!className) {
+        logError("Class is missing.");
+        return;
+      }
 
-    translateImagesWithVisionAPI(className, targetLang, apiKey);
-  });
+      logProcess(`Class Name: ${className}, Target Language: ${targetLang}`);
+      await translateImagesWithVisionAPI(className, targetLang, apiKey);
+    });
 });
-function translateImagesWithVisionAPI(className, targetLang) {
+
+async function translateImagesWithVisionAPI(className, targetLang, apiKey) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.scripting.executeScript(
       {
         target: { tabId: tabs[0].id },
         func: function (className) {
-          const images = document.querySelectorAll(`.${className}`);
-          return Array.from(images).map((img) => img.src);
+          try {
+            const images = document.querySelectorAll(`.${className}`);
+            return Array.from(images).map((img) => img.src);
+          } catch (error) {
+            console.error("Error finding images:", error);
+          }
         },
         args: [className],
       },
-      (results) => {
+      async (results) => {
         if (chrome.runtime.lastError) {
           logError(chrome.runtime.lastError.message);
           return;
         }
 
+        if (
+          !results[0] ||
+          !results[0].result ||
+          results[0].result.length === 0
+        ) {
+          logError("No images found.");
+          return;
+        }
+
+        logProcess(`Found ${results[0].result.length} images.`);
         const imageUrls = results[0].result;
 
-        imageUrls.forEach(async (imageUrl) => {
+        const imageProcessingTasks = imageUrls.map(async (imageUrl) => {
           try {
-            const textAnnotations = await processImageWithVisionAPI(imageUrl);
-
-            const mergedAnnotations = mergeNearbyAnnotations(textAnnotations);
-
-            const translatedAnnotations = await Promise.all(
-              mergedAnnotations.map(async (annotation) => {
-                const translatedText = await translateText(
-                  annotation.description,
-                  targetLang
-                );
-                return { ...annotation, translatedText };
-              })
+            logProcess(`Processing image: ${imageUrl}`);
+            const textAnnotations = await processImageWithVisionAPI(
+              imageUrl,
+              apiKey
             );
+            if (!textAnnotations || textAnnotations.length === 0) {
+              logError("No text detected in the image.");
+              return;
+            }
 
+            const words = extractWords(textAnnotations);
+            const mergedWords = mergeWords(words);
+            const { canvas, ctx } = await downloadAndProcessImage(imageUrl);
+
+            for (const word of mergedWords) {
+              if (!isNumberOrSymbolOrSingleChar(word.text)) {
+                await removeTextWithCanvas(ctx, word);
+              }
+            }
+
+            for (const word of mergedWords) {
+              if (!isNumberOrSymbolOrSingleChar(word.text)) {
+                const translatedText = await translateText(
+                  word.text,
+                  targetLang,
+                  apiKey
+                );
+                await drawTranslatedText(ctx, word, translatedText);
+              }
+            }
+
+            const canvasDataUrl = canvas.toDataURL("image/png");
             chrome.scripting.executeScript({
               target: { tabId: tabs[0].id },
-              func: function (imageUrl, translatedAnnotations) {
+              func: function (imageUrl, canvasDataUrl) {
                 const img = document.querySelector(`img[src="${imageUrl}"]`);
-                if (!img) return;
-
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext("2d");
-
-                const crossImg = new Image();
-                crossImg.crossOrigin = "anonymous";
-                crossImg.src = img.src;
-
-                crossImg.onload = function () {
-                  ctx.drawImage(crossImg, 0, 0);
-
-                  function splitTextIntoLines(ctx, text, maxWidth) {
-                    const words = text.split(" ");
-                    let lines = [];
-                    let currentLine = words[0];
-
-                    for (let i = 1; i < words.length; i++) {
-                      const word = words[i];
-                      const width = ctx.measureText(
-                        currentLine + " " + word
-                      ).width;
-                      if (width < maxWidth) {
-                        currentLine += " " + word;
-                      } else {
-                        lines.push(currentLine);
-                        currentLine = word;
-                      }
-                    }
-                    lines.push(currentLine);
-                    return lines;
-                  }
-
-                  for (const annotation of translatedAnnotations) {
-                    const translatedText = annotation.translatedText;
-                    const vertices = annotation.boundingPoly.vertices;
-
-                    const x = vertices[0].x;
-                    const y = vertices[0].y;
-                    const height = vertices[3].y - vertices[0].y;
-
-                    const fontSize = height * 1.2;
-                    ctx.font = `${fontSize}px Arial`;
-
-                    const translatedWidth =
-                      ctx.measureText(translatedText).width;
-
-                    const paddingX = 5;
-                    const paddingY = 2;
-
-                    ctx.fillStyle = "white";
-                    ctx.fillRect(
-                      x - paddingX,
-                      y - fontSize + paddingY,
-                      translatedWidth + paddingX * 2,
-                      fontSize + paddingY * 2
-                    );
-
-                    const lines = splitTextIntoLines(
-                      ctx,
-                      translatedText,
-                      translatedWidth
-                    );
-
-                    ctx.fillStyle = "black";
-                    lines.forEach((line, index) => {
-                      ctx.fillText(line, x, y + index * fontSize);
-                    });
-                  }
-
-                  img.src = canvas.toDataURL("image/png");
-                };
-
-                crossImg.onerror = function () {
-                  console.error("Failed to load cross-origin image.");
-                };
+                if (img) {
+                  img.src = canvasDataUrl;
+                } else {
+                  logError("Image element not found.");
+                }
               },
-              args: [imageUrl, translatedAnnotations],
+              args: [imageUrl, canvasDataUrl],
             });
+            logProcess(`Finished processing image: ${imageUrl}`);
           } catch (error) {
-            logError(error);
+            logError(error.message);
           }
         });
+
+        await Promise.all(imageProcessingTasks);
       }
     );
   });
 }
 
-function mergeNearbyAnnotations(annotations) {
-  let mergedAnnotations = [];
-
-  annotations.forEach((annotation) => {
-    if (mergedAnnotations.length === 0) {
-      mergedAnnotations.push(annotation);
-    } else {
-      const lastAnnotation = mergedAnnotations[mergedAnnotations.length - 1];
-      const lastY = lastAnnotation.boundingPoly.vertices[0].y;
-      const currentY = annotation.boundingPoly.vertices[0].y;
-
-      if (Math.abs(currentY - lastY) < 30) {
-        lastAnnotation.description += " " + annotation.description;
-      } else {
-        mergedAnnotations.push(annotation);
-      }
-    }
-  });
-
-  return mergedAnnotations;
+function isNumberOrSymbolOrSingleChar(text) {
+  const isNumber = /^\d+$/.test(text);
+  const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
+  const isSingleChar = text.length === 1;
+  return isNumber || isSymbol || isSingleChar;
 }
 
-function splitTextIntoLines(ctx, text, maxWidth) {
-  const words = text.split(" ");
-  let lines = [];
-  let currentLine = words[0];
+async function downloadAndProcessImage(imageUrl) {
+  const response = await fetch(imageUrl);
+  const blob = await response.blob();
+  const img = await createImageBitmap(blob);
 
-  for (let i = 1; i < words.length; i++) {
-    const word = words[i];
-    const width = ctx.measureText(currentLine + " " + word).width;
-    if (width < maxWidth) {
-      currentLine += " " + word;
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  return { canvas, ctx };
+}
+
+async function removeTextWithCanvas(ctx, word) {
+  const { x0, x1, y0, y1 } = word.bbox;
+  const margin = 2;
+  const width = x1 - x0 + margin * 2;
+  const height = y1 - y0 + margin * 2;
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(x0 - margin, y0 - margin, width, height);
+}
+
+async function drawTranslatedText(ctx, word, translatedText) {
+  const { x0, x1, y0, y1 } = word.bbox;
+  const width = x1 - x0;
+  const height = y1 - y0;
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(x0, y0, width, height);
+
+  let fontSize = height * 0.8;
+  if (fontSize < 12) {
+    fontSize = 12;
+  }
+
+  ctx.fillStyle = "black";
+  ctx.font = `${fontSize}px Arial`;
+  const textMetrics = ctx.measureText(translatedText);
+
+  if (textMetrics.width > width) {
+    const scaleFactor = width / textMetrics.width;
+    ctx.font = `${fontSize * scaleFactor}px Arial`;
+  }
+
+  if (translatedText.length > 1 && translatedText.includes(" ")) {
+    wrapText(ctx, translatedText, x0, y1 - height * 0.2, width, height);
+  } else {
+    ctx.fillText(translatedText, x0, y1 - height * 0.2);
+  }
+}
+
+function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(" ");
+  let line = "";
+  for (let n = 0; n < words.length; n++) {
+    const testLine = line + words[n] + " ";
+    const metrics = ctx.measureText(testLine);
+    const testWidth = metrics.width;
+
+    if (testWidth > maxWidth && n > 0) {
+      ctx.fillText(line, x, y);
+      line = words[n] + " ";
+      y += lineHeight;
     } else {
-      lines.push(currentLine);
-      currentLine = word;
+      line = testLine;
     }
   }
-  lines.push(currentLine);
-  return lines;
+  ctx.fillText(line, x, y);
 }
 
-async function processImageWithVisionAPI(imageUrl) {
-  return new Promise(async (resolve, reject) => {
-    const url = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
-    const imageBase64 = await getBase64FromImageUrl(imageUrl);
+async function getBase64FromImageUrl(url) {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
+function extractWords(textAnnotations) {
+  logProcess("Extracting words from annotations");
+
+  return textAnnotations.slice(1).map((word) => {
+    const vertices = word.boundingPoly.vertices;
+    return {
+      text: word.description,
+      bbox: {
+        x0: vertices[0].x || 0,
+        y0: vertices[0].y || 0,
+        x1: vertices[2].x || 0,
+        y1: vertices[2].y || 0,
+      },
+    };
+  });
+}
+
+function mergeWords(words) {
+  logProcess("Merging words");
+  const mergedWords = [];
+  let currentLine = [];
+  let currentY = null;
+
+  for (const word of words) {
+    if (currentY === null || Math.abs(word.bbox.y0 - currentY) <= 50) {
+      if (
+        currentLine.length === 0 ||
+        shouldCombine(currentLine[currentLine.length - 1], word)
+      ) {
+        currentLine.push(word);
+        currentY = word.bbox.y0;
+      } else {
+        mergedWords.push(combineLine(currentLine));
+        currentLine = [word];
+        currentY = word.bbox.y0;
+      }
+    } else {
+      mergedWords.push(combineLine(currentLine));
+      currentLine = [word];
+      currentY = word.bbox.y0;
+    }
+  }
+
+  if (currentLine.length > 0) {
+    mergedWords.push(combineLine(currentLine));
+  }
+
+  return mergedWords;
+}
+
+function shouldCombine(word1, word2) {
+  const gap = word2.bbox.x0 - word1.bbox.x1;
+  return gap >= 0 && gap <= 10;
+}
+
+function combineLine(line) {
+  const text = line.map((word) => word.text).join(" ");
+  const x0 = Math.min(...line.map((word) => word.bbox.x0));
+  const y0 = Math.min(...line.map((word) => word.bbox.y0));
+  const x1 = Math.max(...line.map((word) => word.bbox.x1));
+  const y1 = Math.max(...line.map((word) => word.bbox.y1));
+  return { text, bbox: { x0, y0, x1, y1 } };
+}
+
+async function processImageWithVisionAPI(imageUrl, apiKey) {
+  try {
+    logProcess(`Sending image to Vision API: ${imageUrl}`);
+    const imageBase64 = await getBase64FromImageUrl(imageUrl);
+    const url = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`;
     const requestBody = {
       requests: [
         {
-          image: {
-            content: imageBase64,
-          },
-          features: [
-            {
-              type: "TEXT_DETECTION",
-            },
-          ],
+          image: { content: imageBase64 },
+          features: [{ type: "TEXT_DETECTION" }],
         },
       ],
     };
 
-    fetch(url, {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await response.json();
+    if (data.responses[0].textAnnotations) {
+      return data.responses[0].textAnnotations;
+    } else {
+      throw new Error("No text detected");
+    }
+  } catch (error) {
+    throw new Error(`Vision API error: ${error.message}`);
+  }
+}
+
+async function translateText(text, targetLang, apiKey) {
+  try {
+    logProcess(`Translating text: ${text}`);
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+    const requestBody = {
+      q: text,
+      target: targetLang,
+      format: "text",
+    };
+
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        const annotations = data.responses[0].textAnnotations;
-        if (annotations && annotations.length > 0) {
-          const textAnnotations = annotations.slice(1);
-          resolve(textAnnotations);
-        } else {
-          reject("No text detected");
-        }
-      })
-      .catch((error) => reject(error));
-  });
-}
+    });
 
-async function translateText(text, targetLang) {
-  const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      q: text,
-      target: targetLang,
-    }),
-  });
-
-  const result = await response.json();
-  return result.data.translations[0].translatedText;
-}
-
-function getBase64FromImageUrl(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "Anonymous";
-    img.src = url;
-    img.onload = function () {
-      const canvas = document.createElement("canvas");
-      canvas.width = this.width;
-      canvas.height = this.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(this, 0, 0);
-      const dataURL = canvas.toDataURL("image/png");
-      resolve(dataURL.replace(/^data:image\/(png|jpg);base64,/, ""));
-    };
-    img.onerror = function () {
-      reject("Could not load image");
-    };
-  });
+    const result = await response.json();
+    if (
+      result.data &&
+      result.data.translations &&
+      result.data.translations.length > 0
+    ) {
+      return result.data.translations[0].translatedText;
+    } else {
+      throw new Error("Translation failed");
+    }
+  } catch (error) {
+    throw new Error("Failed to translate text.");
+  }
 }
 
 function logError(message) {
-  const errorLog = document.getElementById("errorLog");
-  errorLog.innerText = message;
+  const errorLog = document.getElementById("errorMessage");
+  errorLog.innerHTML += `<div>${message}</div>`;
+  const logContainer = document.getElementById("errorLog");
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function logProcess(message) {
+  const errorMessage = document.getElementById("errorMessage");
+  const logEntry = document.createElement("div");
+  logEntry.textContent = message;
+  errorMessage.appendChild(logEntry);
+
+  const logContainer = document.getElementById("errorLog");
+  logContainer.scrollTop = logContainer.scrollHeight;
 }
