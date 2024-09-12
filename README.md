@@ -6,7 +6,10 @@ Working principle: It uses a class to find the URLs of images, performs OCR on t
 1. google chrome
 2. install [Allow CORS: Access-Control-Allow-Origin](https://chromewebstore.google.com/detail/allow-cors-access-control/lhobafahddgcelffkeicbaginigeejlf) and trun on
 3. Api [google key](https://console.cloud.google.com/apis/credentials)
-4. class image
+4. CSS selector (It cannot be used with websites that use blobs. The image search is done in the same way as uBlock)\
+   [ `id="image-container"` | `#image-container` ]\
+   [ `class="image-container"` | `.image-container` ]\
+   [ `[class="image-container"] > img` | `.image-container img` ]
 5. [Download](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
 
 # Install
