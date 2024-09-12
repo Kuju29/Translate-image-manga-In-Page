@@ -2,6 +2,19 @@ let apiKey = "";
 let savedClass = "";
 
 document.addEventListener("DOMContentLoaded", () => {
+  chrome.storage.local.get(["logs"], function (result) {
+    const logs = result.logs || [];
+    const errorMessage = document.getElementById("errorMessage");
+    logs.forEach((log) => {
+      const logEntry = document.createElement("div");
+      logEntry.textContent = log;
+      errorMessage.appendChild(logEntry);
+    });
+
+    const logContainer = document.getElementById("errorLog");
+    logContainer.scrollTop = logContainer.scrollHeight;
+  });
+
   chrome.storage.local.get(["apiKey"], (result) => {
     if (result.apiKey) {
       apiKey = result.apiKey;
@@ -33,6 +46,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const className = document.getElementById("classInput").value;
       const targetLang = document.getElementById("languageSelect").value;
 
+      chrome.storage.local.set({ logs: [] });
+
       if (!apiKey) {
         logError("API Key is missing.");
         return;
@@ -43,25 +58,151 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      logProcess(`Class Name: ${className}, Target Language: ${targetLang}`);
-      await translateImagesWithVisionAPI(className, targetLang, apiKey);
+      const selectedMode = document.querySelector(
+        'input[name="translationMode"]:checked'
+      ).value;
+      logProcess(`Selected translation mode: ${selectedMode}`);
+
+      if (selectedMode === "merge") {
+        logProcess("Using merge vertical text mode.");
+        await translateImagesWithVisionAPIMerge(className, targetLang, apiKey);
+      } else {
+        logProcess("Using normal translation mode.");
+        await translateImagesWithVisionAPI(className, targetLang, apiKey);
+      }
     });
 });
 
-async function translateImagesWithVisionAPI(className, targetLang, apiKey) {
+async function translateImagesWithVisionAPI(selector, targetLang, apiKey) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.scripting.executeScript(
       {
         target: { tabId: tabs[0].id },
-        func: function (className) {
+        func: function (selector) {
           try {
-            const images = document.querySelectorAll(`.${className}`);
-            return Array.from(images).map((img) => img.src);
+            const elements = document.querySelectorAll(selector);
+
+            return Array.from(elements)
+              .map(
+                (element) =>
+                  element.src.trim() || element.getAttribute("data-src").trim()
+              )
+              .filter((src) => src);
           } catch (error) {
             console.error("Error finding images:", error);
           }
         },
-        args: [className],
+        args: [selector],
+      },
+      async (results) => {
+        if (chrome.runtime.lastError) {
+          logError(chrome.runtime.lastError.message);
+          return;
+        }
+
+        if (
+          !results[0] ||
+          !results[0].result ||
+          results[0].result.length === 0
+        ) {
+          logError("No images found.");
+          return;
+        }
+
+        logProcess(`Found ${results[0].result.length} images.`);
+        const imageUrls = results[0].result;
+
+        const imageProcessingTasks = imageUrls.map(async (imageUrl) => {
+          try {
+            logProcess(`Processing image: ${imageUrl}`);
+            const textAnnotations = await processImageWithVisionAPI(
+              imageUrl,
+              apiKey
+            );
+            if (!textAnnotations || textAnnotations.length === 0) {
+              logError("No text detected in the image.");
+              return;
+            }
+
+            const words = extractWords(textAnnotations);
+            const mergedWords = mergeWordsInSameLine(words);
+            const { canvas, ctx } = await downloadAndProcessImage(imageUrl);
+
+            for (const word of mergedWords) {
+              if (!isNumberOrSymbolOrSingleChar(word.text)) {
+                await removeTextWithCanvas(ctx, word);
+              }
+            }
+
+            for (const word of mergedWords) {
+              if (!isNumberOrSymbolOrSingleChar(word.text)) {
+                const translatedText = await translateText(
+                  word.text,
+                  targetLang,
+                  apiKey
+                );
+                await drawTranslatedText(ctx, word, translatedText);
+              }
+            }
+
+            const canvasDataUrl = canvas.toDataURL("image/png");
+            chrome.scripting.executeScript({
+              target: { tabId: tabs[0].id },
+              func: function (imageUrl, canvasDataUrl) {
+                const img = document.querySelector(
+                  `img[src="${imageUrl}"], img[data-src="${imageUrl}"], img[data-lazy="${imageUrl}"]`
+                );
+                if (img) {
+                  img.src = canvasDataUrl;
+                  img.setAttribute("data-src", canvasDataUrl);
+                  img.setAttribute("data-lazy", canvasDataUrl);
+
+                  img.classList.remove("lazyload", "lazyloaded");
+
+                  if (img.hasAttribute("data-srcset")) {
+                    img.setAttribute("data-srcset", canvasDataUrl);
+                  }
+                  if (img.hasAttribute("srcset")) {
+                    img.setAttribute("srcset", canvasDataUrl);
+                  }
+                } else {
+                  logError("Image element not found.");
+                }
+              },
+              args: [imageUrl, canvasDataUrl],
+            });
+            logProcess(`Finished processing image: ${imageUrl}`);
+          } catch (error) {
+            logError(error.message);
+          }
+        });
+
+        await Promise.all(imageProcessingTasks);
+      }
+    );
+  });
+}
+
+async function translateImagesWithVisionAPIMerge(selector, targetLang, apiKey) {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabs[0].id },
+        func: function (selector) {
+          try {
+            const elements = document.querySelectorAll(selector);
+
+            return Array.from(elements)
+              .map(
+                (element) =>
+                  element.src.trim() || element.getAttribute("data-src").trim()
+              )
+              .filter((src) => src);
+          } catch (error) {
+            console.error("Error finding images:", error);
+          }
+        },
+        args: [selector],
       },
       async (results) => {
         if (chrome.runtime.lastError) {
@@ -118,9 +259,22 @@ async function translateImagesWithVisionAPI(className, targetLang, apiKey) {
             chrome.scripting.executeScript({
               target: { tabId: tabs[0].id },
               func: function (imageUrl, canvasDataUrl) {
-                const img = document.querySelector(`img[src="${imageUrl}"]`);
+                const img = document.querySelector(
+                  `img[src="${imageUrl}"], img[data-src="${imageUrl}"], img[data-lazy="${imageUrl}"]`
+                );
                 if (img) {
                   img.src = canvasDataUrl;
+                  img.setAttribute("data-src", canvasDataUrl);
+                  img.setAttribute("data-lazy", canvasDataUrl);
+
+                  img.classList.remove("lazyload", "lazyloaded");
+
+                  if (img.hasAttribute("data-srcset")) {
+                    img.setAttribute("data-srcset", canvasDataUrl);
+                  }
+                  if (img.hasAttribute("srcset")) {
+                    img.setAttribute("srcset", canvasDataUrl);
+                  }
                 } else {
                   logError("Image element not found.");
                 }
@@ -137,6 +291,55 @@ async function translateImagesWithVisionAPI(className, targetLang, apiKey) {
       }
     );
   });
+}
+
+function mergeWordsInSameLine(words) {
+  const mergedWords = [];
+  let currentLine = [];
+  let currentY = null;
+
+  for (const word of words) {
+    if (currentY === null || Math.abs(word.bbox.y0 - currentY) <= 10) {
+      if (
+        currentLine.length === 0 ||
+        shouldCombineWordsHorizontally(
+          currentLine[currentLine.length - 1],
+          word
+        )
+      ) {
+        currentLine.push(word);
+        currentY = word.bbox.y0;
+      } else {
+        mergedWords.push(combineWords(currentLine));
+        currentLine = [word];
+        currentY = word.bbox.y0;
+      }
+    } else {
+      mergedWords.push(combineWords(currentLine));
+      currentLine = [word];
+      currentY = word.bbox.y0;
+    }
+  }
+
+  if (currentLine.length > 0) {
+    mergedWords.push(combineWords(currentLine));
+  }
+
+  return mergedWords;
+}
+
+function shouldCombineWordsHorizontally(word1, word2) {
+  const gap = word2.bbox.x0 - word1.bbox.x1;
+  return gap >= 0 && gap <= 20;
+}
+
+function combineWords(line) {
+  const text = line.map((word) => word.text).join(" ");
+  const x0 = Math.min(...line.map((word) => word.bbox.x0));
+  const y0 = Math.min(...line.map((word) => word.bbox.y0));
+  const x1 = Math.max(...line.map((word) => word.bbox.x1));
+  const y1 = Math.max(...line.map((word) => word.bbox.y1));
+  return { text, bbox: { x0, y0, x1, y1 } };
 }
 
 function isNumberOrSymbolOrSingleChar(text) {
@@ -365,10 +568,16 @@ function logError(message) {
 }
 
 function logProcess(message) {
-  const errorMessage = document.getElementById("errorMessage");
   const logEntry = document.createElement("div");
   logEntry.textContent = message;
+  const errorMessage = document.getElementById("errorMessage");
   errorMessage.appendChild(logEntry);
+
+  chrome.storage.local.get(["logs"], function (result) {
+    const logs = result.logs || [];
+    logs.push(message);
+    chrome.storage.local.set({ logs: logs });
+  });
 
   const logContainer = document.getElementById("errorLog");
   logContainer.scrollTop = logContainer.scrollHeight;
