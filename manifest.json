@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "description": "https://github.com/Kuju29/Translate-image-manga-In-Page",
   "name": "Image Translator",
   "version": "1.1",
   "permissions": [
