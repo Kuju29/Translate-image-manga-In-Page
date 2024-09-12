@@ -16,11 +16,10 @@
         margin-top: 10px;
         border: 1px solid #ccc;
         padding: 10px;
-        width: 90%;
-        height: 40px;
+        width: 100%;
+        height: 150px;
         overflow-y: scroll;
         background-color: #f9f9f9;
-        margin-right: auto;
       }
       .form-group {
         display: flex;
@@ -40,7 +39,7 @@
     <label for="apiKeyInput">Enter Google API Key:</label>
     <input type="text" id="apiKeyInput" placeholder="Enter your API key here" />
 
-    <label for="classInput">Enter class to find images:</label>
+    <label for="classInput">Enter CSS to find images:</label>
     <input
       type="text"
       id="classInput"
@@ -57,9 +56,24 @@
       </select>
     </div>
 
+    <div class="form-group">
+      <label>Translation mode:</label>
+      <input
+        type="radio"
+        id="normalMode"
+        name="translationMode"
+        value="normal"
+        checked
+      />
+      <label for="normalMode">Normal translation</label>
+      <input type="radio" id="mergeMode" name="translationMode" value="merge" />
+      <label for="mergeMode">Merge vertical text</label>
+    </div>
+
     <button id="translateBtn">Translate Images</button>
 
     <div id="errorLog">
+      <strong>Log:</strong>
       <div id="errorMessage">None</div>
     </div>
 
