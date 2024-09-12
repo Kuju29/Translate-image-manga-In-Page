@@ -14,13 +14,21 @@
       #errorLog {
         color: red;
         margin-top: 10px;
+        border: 1px solid #ccc;
+        padding: 10px;
+        width: 90%;
+        height: 40px;
+        overflow-y: scroll;
+        background-color: #f9f9f9;
+        margin-right: auto;
       }
       .form-group {
         display: flex;
         align-items: center;
         margin-bottom: 10px;
       }
-      .form-group select, .form-group input {
+      .form-group select,
+      .form-group input {
         margin-right: 10px;
         padding: 5px;
       }
@@ -29,15 +37,16 @@
   <body>
     <h2>Image Translator</h2>
 
-    <!-- ช่องสำหรับใส่ API Key -->
     <label for="apiKeyInput">Enter Google API Key:</label>
     <input type="text" id="apiKeyInput" placeholder="Enter your API key here" />
 
-    <!-- ช่องสำหรับกรอก class -->
     <label for="classInput">Enter class to find images:</label>
-    <input type="text" id="classInput" placeholder="e.g. ts-main-image curdown" />
+    <input
+      type="text"
+      id="classInput"
+      placeholder="e.g. ts-main-image curdown"
+    />
 
-    <!-- Dropdown สำหรับเลือกภาษา -->
     <div class="form-group">
       <label for="languageSelect">Select language:</label>
       <select id="languageSelect">
@@ -45,17 +54,15 @@
         <option value="en">English</option>
         <option value="es">Spanish</option>
         <option value="fr">French</option>
-        <!-- เพิ่มภาษาอื่นๆ ได้ที่นี่ -->
       </select>
     </div>
 
-    <!-- ปุ่มแปลภาพ -->
     <button id="translateBtn">Translate Images</button>
 
-    <!-- แสดงข้อความ error -->
-    <p id="errorLog">Error Log: <span id="errorMessage">None</span></p>
+    <div id="errorLog">
+      <div id="errorMessage">None</div>
+    </div>
 
-    <!-- โหลด Tesseract.js จาก CDN -->
     <script src="popup.js"></script>
   </body>
 </html>
