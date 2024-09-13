@@ -22,9 +22,8 @@ Working principle: It uses a class to find the URLs of images, performs OCR on t
 I haven't tested it on many websites yet.\
 Make sure to turn off `Allow CORS: Access-Control-Allow-Origin` every time after you are not using this extension.
 
-![image](https://github.com/user-attachments/assets/4ebf4695-694e-4825-a23d-83d36c844e59)
+![image](https://github.com/user-attachments/assets/796514c6-d29f-4572-b2df-14aae1c98a28)
 
-![image](https://github.com/user-attachments/assets/4cfb75d3-30b6-42cc-8535-b66062b9cf92)
+![image](https://github.com/user-attachments/assets/63c7f018-10e1-456d-88d3-cb79577a6e48)
 
-![image](https://github.com/user-attachments/assets/3d3616a1-7363-473e-9299-598aabd776c0)
-
+![image](https://github.com/user-attachments/assets/50570a94-a518-4e06-86f3-5fbff136d12f)
