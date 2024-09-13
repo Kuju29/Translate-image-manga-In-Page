@@ -80,7 +80,7 @@ async function translateImagesWithVisionAPI(selector, targetLang, apiKey) {
         target: { tabId: tabs[0].id },
         func: function (selector) {
           try {
-            const elements = document.querySelectorAll(selector);
+            const elements = document.querySelectorAll(`${selector}`);
 
             return Array.from(elements)
               .map(
@@ -190,7 +190,7 @@ async function translateImagesWithVisionAPIMerge(selector, targetLang, apiKey) {
         target: { tabId: tabs[0].id },
         func: function (selector) {
           try {
-            const elements = document.querySelectorAll(selector);
+            const elements = document.querySelectorAll(`${selector}`);
 
             return Array.from(elements)
               .map(
