@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 import requests, base64, time
 
 original_page_url = ('https://rawkuma.com/takarakuji-de-40-oku-atattandakedo-isekai-ni-ijuu-suru-chapter-85/', '[class*="ts-main-image"]')
+lang = 'th'
 
 class ImageTranslator:
     def __init__(self, sb_instance):
@@ -31,12 +32,12 @@ class ImageTranslator:
             byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
         var byteArray = new Uint8Array(byteNumbers);
-        var file = new File([byteArray], 'file.jpg', { type: 'image/jpeg' });
+        var file = new File([byteArray], 'file.jpg', { type: 'image/jpeg' }); 
         var dataTransfer = new DataTransfer();
         dataTransfer.items.add(file);
         fileInput.files = dataTransfer.files;
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        """, file_input_selector, base64_image)
+        """, file_input_selector, base64_image) # จำลองการลาก
 
     def download_blob_image(self, blob_url):
         """Fetch the translated image as Base64 from the blob URL."""
@@ -78,10 +79,10 @@ class ImageTranslator:
 
             base64_image = self.download_image_as_base64(image_url)
             self.drag_and_drop_file(
-                'input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]', base64_image)
+                'input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]', base64_image) # <input id="ucj-39" type="file" name="file" class="ZdLswd" accept="image/jpeg, image/png, .jpeg, .jpg, .png" jsname="qGt1Bf" jsaction="change:bK2emb; click:fUEfwd;"> 
 
             translated_image = self.sb.wait_for_element_visible(
-                '.CMhTbb.tyW0pd img', timeout=2)
+                '.CMhTbb.tyW0pd img', timeout=2) # <div class="CMhTbb tyW0pd"><img class="Jmlpdc" loading="lazy" src="blob:https://translate.google.com/a1af381d-235d-4521-aac4-dfe8cee3e964" alt="9
             translated_image_blob_url = translated_image.get_attribute("src")
             print(f"Translated Blob URL: {translated_image_blob_url}")
 
@@ -124,7 +125,7 @@ class ImageTranslator:
     def clear_image(self):
         """Click the 'Clear Image' button using updated button structure."""
         try:
-            clear_button_selector = 'button.VfPpkd-Bz112c-LgbsSe.yHy1rc.eT1oJ.mN1ivc.B0czFe'
+            clear_button_selector = 'button.VfPpkd-Bz112c-LgbsSe.yHy1rc.eT1oJ.mN1ivc.B0czFe' # <button class="VfPpkd-Bz112c-LgbsSe yHy1rc eT1oJ mN1ivc B0czFe" jscontroller="soHxf" jsaction="click:cOuCgd; mousedown:UX7yZ; 
             self.sb.wait_for_element_visible(clear_button_selector, timeout=2)
             self.sb.click(clear_button_selector)
             print("Cleared the image.")
@@ -172,7 +173,7 @@ class ImageTranslator:
                         image_urls = [img.get_attribute("src") for img in images if img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))]
 
                         self.sb.uc_open_with_reconnect(
-                            'https://translate.google.com/?sl=en&tl=th&op=images')
+                            f'https://translate.google.com/?sl=auto&tl={lang}&op=images')
                         self.process_images(image_urls, current_url, selector)
                     else:
                         print("No images found on this page.")
@@ -198,7 +199,7 @@ with SB(uc=True, test=False, rtf=True, headless=False) as sb:
         translator = ImageTranslator(sb)
 
         sb.uc_open_with_reconnect(
-            'https://translate.google.com/?sl=auto&tl=th&op=images')
+            f'https://translate.google.com/?sl=auto&tl={lang}&op=images')
 
         translator.process_images(image_urls, page_url, selector)
         translator.monitor_url_change_and_translate(page_url, selector)
