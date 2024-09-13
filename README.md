@@ -11,6 +11,8 @@ Working principle: It uses a class to find the URLs of images, performs OCR on t
    [ `class="image-container"` | `.image-container` ]\
    [ `[class="image-container"] > img` | `.image-container img` ]
 5. [Download](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
+6. Unzip `Translate-image-manga-In-Page-main`
+7. Zip file only file in folder `Translate-image-manga-In-Page`
 
 # Install
 1. Open `Developer mode` in `chrome://extensions/`
