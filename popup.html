@@ -3,78 +3,182 @@
   <head>
     <title>Image Translator</title>
     <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
       body {
-        font-family: Arial, sans-serif;
-        padding: 10px;
+        font-family: "Arial", sans-serif;
+        padding: 0;
+        margin: 0;
+        background: #2e2e3e; /* สีพื้นหลังของ popup */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
       }
-      button {
-        margin-top: 10px;
-        padding: 5px 10px;
-      }
-      #errorLog {
-        color: red;
-        margin-top: 10px;
-        border: 1px solid #ccc;
-        padding: 10px;
+
+      .container {
+        background-color: #3c3c4e; /* สีพื้นหลังของกล่อง */
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2); /* เงาที่เข้มขึ้นเล็กน้อย */
+        padding: 20px;
         width: 100%;
-        height: 150px;
-        overflow-y: scroll;
-        background-color: #f9f9f9;
+        max-width: 400px;
+        text-align: center;
+        border: none;
       }
+
+      h2 {
+        margin-bottom: 15px;
+        font-size: 22px;
+        color: #ffffff; /* สีของหัวข้อ */
+      }
+
       .form-group {
+        margin-bottom: 10px;
+        text-align: left;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        font-size: 14px;
+        color: #cccccc; /* สีของข้อความ */
+      }
+
+      .form-group input[type="text"],
+      .form-group select {
+        width: 100%;
+        padding: 8px;
+        font-size: 13px;
+        border: 1px solid #555555; /* สีของขอบฟอร์ม */
+        background-color: #2a2a3a; /* สีพื้นหลังของฟอร์ม */
+        color: #ffffff; /* สีข้อความภายในฟอร์ม */
+        transition: border 0.3s ease;
+      }
+
+      .form-group input[type="text"]:focus,
+      .form-group select:focus {
+        border-color: #4caf50;
+      }
+
+      .radio-group {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 5px;
+      }
+
+      .radio-group label {
+        font-weight: normal;
         display: flex;
         align-items: center;
-        margin-bottom: 10px;
+        font-size: 13px;
+        color: #cccccc; /* สีของตัวเลือก */
       }
-      .form-group select,
-      .form-group input {
-        margin-right: 10px;
-        padding: 5px;
+
+      .radio-group input {
+        margin-right: 5px;
+      }
+
+      button {
+        width: 100%;
+        padding: 10px;
+        font-size: 14px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+        margin-top: 10px;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      #errorLog {
+        color: #dfafaf;
+        margin-top: 10px;
+        padding: 8px;
+        width: 100%;
+        background-color: #2a2a3a;
+        border: 1px solid #555555;
+        height: 200px;
+        overflow-y: auto;
+        text-align: left;
+      }
+
+      @media (max-width: 400px) {
+        .container {
+          min-width: 300px;
+        }
       }
     </style>
   </head>
   <body>
-    <h2>Image Translator</h2>
+    <div class="container">
+      <h2>Image Translator</h2>
+      <div class="form-group">
+        <label for="apiKeyInput">Enter Google API Key:</label>
+        <input
+          type="text"
+          id="apiKeyInput"
+          placeholder="Enter your API key here"
+        />
+      </div>
 
-    <label for="apiKeyInput">Enter Google API Key:</label>
-    <input type="text" id="apiKeyInput" placeholder="Enter your API key here" />
+      <div class="form-group">
+        <label for="classInput">Enter CSS to find images:</label>
+        <input
+          type="text"
+          id="classInput"
+          placeholder="e.g. .ts-main-image img"
+        />
+      </div>
 
-    <label for="classInput">Enter CSS to find images:</label>
-    <input
-      type="text"
-      id="classInput"
-      placeholder="e.g. ts-main-image curdown"
-    />
+      <div class="form-group">
+        <label for="languageSelect">Select language:</label>
+        <select id="languageSelect">
+          <option value="th">Thai</option>
+          <option value="en">English</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+        </select>
+      </div>
 
-    <div class="form-group">
-      <label for="languageSelect">Select language:</label>
-      <select id="languageSelect">
-        <option value="th">Thai</option>
-        <option value="en">English</option>
-        <option value="es">Spanish</option>
-        <option value="fr">French</option>
-      </select>
-    </div>
+      <div class="form-group">
+        <label>Translation mode:</label>
+        <div class="radio-group">
+          <label for="normalMode">
+            <input
+              type="radio"
+              id="normalMode"
+              name="translationMode"
+              value="normal"
+              checked
+            />
+            Normal Text
+          </label>
+          <label for="mergeMode">
+            <input
+              type="radio"
+              id="mergeMode"
+              name="translationMode"
+              value="merge"
+            />
+            Merge Text
+          </label>
+        </div>
+      </div>
 
-    <div class="form-group">
-      <label>Translation mode:</label>
-      <input
-        type="radio"
-        id="normalMode"
-        name="translationMode"
-        value="normal"
-        checked
-      />
-      <label for="normalMode">Normal translation</label>
-      <input type="radio" id="mergeMode" name="translationMode" value="merge" />
-      <label for="mergeMode">Merge vertical text</label>
-    </div>
+      <button id="translateBtn">Translate Images</button>
 
-    <button id="translateBtn">Translate Images</button>
-
-    <div id="errorLog">
-      <strong>Log:</strong>
-      <div id="errorMessage">None</div>
+      <div id="errorLog">
+        <div id="errorMessage"></div>
+      </div>
     </div>
 
     <script src="popup.js"></script>
