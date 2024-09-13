@@ -1,3 +1,5 @@
+# https://youtu.be/EVLBudGqJ9k
+
 I created this for my own use, but there may be others who take this idea and improve it. I built it entirely using ChatGPT, and some code may be unnecessary, but I didn’t remove it. I will update it again later.
 
 Working principle: It uses a class to find the URLs of images, performs OCR on those images, then translates and replaces the URLs with the new translated images
