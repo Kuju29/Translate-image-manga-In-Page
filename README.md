@@ -49,8 +49,8 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 1. [Download the extension](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
 2. Unzip the downloaded file: `Translate-image-manga-In-Page-main`
-3. Zip the contents **inside** the folder `Translate-image-manga-In-Page`, not the folder itself.
-
+3. Compress all the files in the folder to make them ready for installation in Google Chrome.
+![image](https://github.com/user-attachments/assets/6aa87cda-220f-4ea9-b922-c3312f113780)
 ---
 
 ## Installation Steps
