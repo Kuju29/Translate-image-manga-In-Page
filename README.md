@@ -8,10 +8,29 @@ Working principle: It uses a class to find the URLs of images, performs OCR on t
 1. google chrome
 2. install [Allow CORS: Access-Control-Allow-Origin](https://chromewebstore.google.com/detail/allow-cors-access-control/lhobafahddgcelffkeicbaginigeejlf) and trun on
 3. Api [google key](https://console.cloud.google.com/apis/credentials)
-4. CSS selector (It cannot be used with websites that use blobs. The image search is done in the same way as uBlock)\
-   [ `id="image-container"` | `#image-container` ]\
-   [ `class="image-container"` | `.image-container` ]\
-   [ `[class="image-container"] > img` | `.image-container img` ]
+4. CSS selector (All images should have the same class, and they cannot be used on websites that use blob images as links)
+
+| Full Form (HTML Attribute)                  | Abbreviation (CSS Selector)            |
+|---------------------------------------------|----------------------------------------|
+| `[class="image-container"]`                 | `.image-container`                     |
+| `[id="main-header"]`                        | `#main-header`                         |
+| `[rel="stylesheet"]`                        | `link[rel="stylesheet"]`               |
+| `[href="https://example.com"]`              | `a[href="https://example.com"]`        |
+| `[type="submit"]`                           | `input[type="submit"]`                 |
+| `[role="navigation"]`                       | `[role="navigation"]`                  |
+| `[data-toggle="dropdown"]`                  | `[data-toggle="dropdown"]`             |
+| `[alt="Image description"]`                 | `img[alt="Image description"]`         |
+| `[src^="https://"]`                         | `img[src^="https://"]`                 |
+| `[name="email"]`                            | `input[name="email"]`                  |
+| `[value="Search"]`                          | `input[value="Search"]`                |
+| `[class="image-container"] > img`           | `.image-container > img`               |
+| `[class="button primary"] > span`           | `.button.primary > span`               |
+| `div[class="content"] p`                    | `div.content p`                        |
+| `[class="nav"] ul > li[class="nav-item"]`   | `.nav ul > li.nav-item`                |
+| `[class="menu-item"] a:hover`               | `.menu-item a:hover`                   |
+| `[class="form-group"] input[type="text"]`   | `.form-group input[type="text"]`       |
+| `[class="gallery"] div[class="gallery-item"]`| `.gallery div.gallery-item`            |
+
 5. [Download](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
 6. Unzip `Translate-image-manga-In-Page-main`
 7. Zip file only file in folder `Translate-image-manga-In-Page`
