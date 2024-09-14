@@ -432,21 +432,32 @@ async function getBase64FromImageUrl(url) {
   });
 }
 
-function extractWords(textAnnotations) {
-  logProcess("Extracting words from annotations");
+function extractWords(fullTextAnnotation) {
+  logProcess("Extracting words from fullTextAnnotation");
 
-  return textAnnotations.slice(1).map((word) => {
-    const vertices = word.boundingPoly.vertices;
-    return {
-      text: word.description,
-      bbox: {
-        x0: vertices[0].x || 0,
-        y0: vertices[0].y || 0,
-        x1: vertices[2].x || 0,
-        y1: vertices[2].y || 0,
-      },
-    };
+  const words = [];
+
+  fullTextAnnotation.pages.forEach((page) => {
+    page.blocks.forEach((block) => {
+      block.paragraphs.forEach((paragraph) => {
+        paragraph.words.forEach((word) => {
+          const text = word.symbols.map((s) => s.text).join("");
+          const vertices = word.boundingBox.vertices;
+          words.push({
+            text: text,
+            bbox: {
+              x0: vertices[0].x || 0,
+              y0: vertices[0].y || 0,
+              x1: vertices[2].x || 0,
+              y1: vertices[2].y || 0,
+            },
+          });
+        });
+      });
+    });
   });
+
+  return words;
 }
 
 function mergeWords(words) {
@@ -505,7 +516,7 @@ async function processImageWithVisionAPI(imageUrl, apiKey) {
       requests: [
         {
           image: { content: imageBase64 },
-          features: [{ type: "TEXT_DETECTION" }],
+          features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
         },
       ],
     };
@@ -517,8 +528,8 @@ async function processImageWithVisionAPI(imageUrl, apiKey) {
     });
 
     const data = await response.json();
-    if (data.responses[0].textAnnotations) {
-      return data.responses[0].textAnnotations;
+    if (data.responses[0].fullTextAnnotation) {
+      return data.responses[0].fullTextAnnotation;
     } else {
       throw new Error("No text detected");
     }
