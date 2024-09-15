@@ -15,37 +15,163 @@ document.addEventListener("DOMContentLoaded", () => {
     logContainer.scrollTop = logContainer.scrollHeight;
   });
 
-  chrome.storage.local.get(["apiKey"], (result) => {
-    if (result.apiKey) {
-      apiKey = result.apiKey;
-      document.getElementById("apiKeyInput").value = apiKey;
-    }
-  });
+  chrome.storage.local.get(["userSelections"], (result) => {
+    const selections = result.userSelections || {};
 
-  chrome.storage.local.get(["savedClass"], (result) => {
-    if (result.savedClass) {
-      savedClass = result.savedClass;
-      document.getElementById("classInput").value = savedClass;
+    if (selections.apiKey) {
+      apiKey = selections.apiKey;
+      document.getElementById("apiKeyInput").value = selections.apiKey;
+    }
+    if (selections.className) {
+      document.getElementById("manualClassInput").value = selections.className;
+    }
+    if (selections.language) {
+      document.getElementById("languageSelect").value = selections.language;
+    }
+    if (selections.translationMode) {
+      document.querySelector(
+        `input[name="translationMode"][value="${selections.translationMode}"]`
+      ).checked = true;
     }
   });
 
   document.getElementById("apiKeyInput").addEventListener("change", (event) => {
     apiKey = event.target.value;
-    chrome.storage.local.set({ apiKey: apiKey });
+    saveUserSelection("apiKey", event.target.value);
   });
 
-  document.getElementById("classInput").addEventListener("change", (event) => {
-    savedClass = event.target.value;
-    chrome.storage.local.set({ savedClass: savedClass });
+  document
+    .getElementById("manualClassInput")
+    .addEventListener("change", (event) => {
+      saveUserSelection("className", event.target.value);
+    });
+
+  document
+    .getElementById("languageSelect")
+    .addEventListener("change", (event) => {
+      saveUserSelection("language", event.target.value);
+    });
+
+  document
+    .querySelectorAll('input[name="translationMode"]')
+    .forEach((radio) => {
+      radio.addEventListener("change", (event) => {
+        saveUserSelection("translationMode", event.target.value);
+      });
+    });
+
+  document.getElementById("classSelect").addEventListener("change", (event) => {
+    const selectedClass = event.target.value;
+    document.getElementById("manualClassInput").value = selectedClass;
+    saveUserSelection("className", selectedClass);
   });
+
+  function saveUserSelection(key, value) {
+    chrome.storage.local.get(["userSelections"], (result) => {
+      const selections = result.userSelections || {};
+      selections[key] = value;
+      chrome.storage.local.set({ userSelections: selections });
+    });
+  }
+
+  document
+    .getElementById("modeSelect")
+    .addEventListener("change", async function () {
+      const manualInput = document.getElementById("manualClassInput");
+      const autoSearchContainer = document.getElementById(
+        "autoSearchContainer"
+      );
+
+      if (this.value === "manual") {
+        manualInput.style.display = "block";
+        autoSearchContainer.style.display = "none";
+      } else if (this.value === "auto") {
+        manualInput.style.display = "none";
+        autoSearchContainer.style.display = "flex";
+
+        const tabs = await getActiveTabs();
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: tabs[0].id },
+            func: function () {
+              const images = document.querySelectorAll(
+                "img[src$='.jpeg'], img[src$='.jpg'], img[src$='.png'], img[src$='.webp']"
+              );
+              const selectorsWithImages = new Set();
+
+              images.forEach((img) => {
+                let currentElement = img;
+
+                const buildSelector = (element) => {
+                  let selector = element.tagName.toLowerCase();
+
+                  if (element.id) {
+                    selector += `#${element.id}`;
+                  }
+
+                  if (element.classList.length > 0) {
+                    selector += "." + Array.from(element.classList).join(".");
+                  }
+
+                  return selector;
+                };
+
+                for (let i = 0; i < 3; i++) {
+                  currentElement = currentElement.parentElement;
+                  if (!currentElement) break;
+
+                  const selector = buildSelector(currentElement);
+                  const matchedImages = currentElement.querySelectorAll("img");
+
+                  if (matchedImages.length > 3) {
+                    selectorsWithImages.add(selector);
+                    break;
+                  }
+                }
+              });
+
+              return Array.from(selectorsWithImages);
+            },
+          },
+          (results) => {
+            if (chrome.runtime.lastError) {
+              logError(chrome.runtime.lastError.message);
+              return;
+            }
+
+            const foundSelectors = results[0].result;
+            const selectElement = document.getElementById("classSelect");
+            selectElement.innerHTML =
+              '<option value="" disabled selected>Select a CSS class</option>';
+
+            if (foundSelectors.length > 0) {
+              foundSelectors.forEach((selector) => {
+                const option = document.createElement("option");
+                option.value = selector + " img";
+                option.textContent = selector + " img";
+                selectElement.appendChild(option);
+              });
+            } else {
+              logError("ไม่พบ CSS Selector ของ parent ที่มีภาพมากกว่า 3 รูป.");
+            }
+          }
+        );
+      }
+    });
 
   document
     .getElementById("translateBtn")
     .addEventListener("click", async () => {
       logProcess("Starting translation process...");
-      const className = document.getElementById("classInput").value;
-      const targetLang = document.getElementById("languageSelect").value;
 
+      let className = "";
+      if (document.getElementById("modeSelect").value === "manual") {
+        className = document.getElementById("manualClassInput").value;
+      } else {
+        className = document.getElementById("classSelect").value;
+      }
+
+      const targetLang = document.getElementById("languageSelect").value;
       chrome.storage.local.set({ logs: [] });
 
       if (!apiKey) {
@@ -267,7 +393,7 @@ class APINormalMode {
     const isNumber = /^\d+$/.test(text);
     const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
     const isSingleChar = text.length === 1;
-    return false; // isNumber || isSymbol || isSingleChar;
+    return false;
   }
 
   async downloadAndProcessImage(imageUrl) {
@@ -303,8 +429,9 @@ class APINormalMode {
     ctx.fillRect(x0, y0, width, height);
 
     let fontSize = height * 0.8;
-    if (fontSize < 12) {
-      fontSize = 12;
+    const minFontSize = 16;
+    if (fontSize < minFontSize) {
+      fontSize = minFontSize;
     }
 
     ctx.fillStyle = "black";
@@ -313,7 +440,13 @@ class APINormalMode {
 
     if (textMetrics.width > width) {
       const scaleFactor = width / textMetrics.width;
-      ctx.font = `${fontSize * scaleFactor}px Arial`;
+      const scaledFontSize = fontSize * scaleFactor;
+
+      if (scaledFontSize >= minFontSize) {
+        ctx.font = `${scaledFontSize}px Arial`;
+      } else {
+        ctx.font = `${minFontSize}px Arial`;
+      }
     }
 
     if (translatedText.length > 1 && translatedText.includes(" ")) {
@@ -678,7 +811,7 @@ class APIMergeMode {
     const isNumber = /^\d+$/.test(text);
     const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
     const isSingleChar = text.length <= 1;
-    return false; // isNumber || isSymbol || isSingleChar;
+    return false;
   }
 
   async replaceImageInPage(imageUrl, canvasDataUrl) {
