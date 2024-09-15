@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "description": "https://github.com/Kuju29/Translate-image-manga-In-Page",
-  "name": "Image Translator",
-  "version": "1.1",
+  "description": "An extension for translating text from images on websites. With the image's CSS selector. Read more: https://github.com/Kuju29/Translate-image-manga-In-Page",
+  "name": "Image Translator In Page",
+  "version": "1.2",
   "permissions": [
     "activeTab",
     "scripting",
