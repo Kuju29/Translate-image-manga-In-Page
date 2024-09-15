@@ -584,7 +584,7 @@ class APIMergeMode {
         const fullTextAnnotation = await processImageWithVisionAPI(
           imageUrl,
           this.apiKey,
-          "TEXT_DETECTION"
+          "DOCUMENT_TEXT_DETECTION"
         );
         if (!fullTextAnnotation) {
           logError("No text detected in the image.");
