@@ -392,8 +392,8 @@ class APINormalMode {
   isNumberOrSymbolOrSingleChar(text) {
     const isNumber = /^\d+$/.test(text);
     const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
-    const isSingleChar = text.length === 1;
-    return false;
+    const isSingleChar = text.length <= 1;
+    return isNumber || isSymbol || isSingleChar;
   }
 
   async downloadAndProcessImage(imageUrl) {
@@ -811,7 +811,7 @@ class APIMergeMode {
     const isNumber = /^\d+$/.test(text);
     const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
     const isSingleChar = text.length <= 1;
-    return false;
+    return isNumber || isSymbol || isSingleChar;
   }
 
   async replaceImageInPage(imageUrl, canvasDataUrl) {
