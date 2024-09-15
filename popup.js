@@ -484,9 +484,6 @@ class APINormalMode {
     const width = x1 - x0;
     const height = y1 - y0;
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0)";
-    ctx.fillRect(x0, y0, width, height);
-
     let fontSize = height * 0.8;
     const minFontSize = 16;
     if (fontSize < minFontSize) {
@@ -782,9 +779,6 @@ class APIMergeMode {
     const { x0, x1, y0, y1 } = block.bbox;
     const width = x1 - x0;
     const height = y1 - y0;
-
-    ctx.fillStyle = "rgba(255, 255, 255, 0)";
-    ctx.fillRect(x0, y0, width, height);
 
     let fontSize = Math.min(height * 0.8, 40);
 
