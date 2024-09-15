@@ -152,7 +152,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectElement.appendChild(option);
               });
             } else {
-              logError("ไม่พบ CSS Selector ของ parent ที่มีภาพมากกว่า 3 รูป.");
+              logError(
+                "No CSS Selector found for parent with more than 3 images."
+              );
             }
           }
         );
@@ -238,7 +240,8 @@ class APINormalMode {
         logProcess(`Processing image: ${imageUrl}`);
         const textAnnotations = await processImageWithVisionAPI(
           imageUrl,
-          this.apiKey
+          this.apiKey,
+          "DOCUMENT_TEXT_DETECTION"
         );
         if (!textAnnotations || textAnnotations.length === 0) {
           logError("No text detected in the image.");
@@ -413,11 +416,67 @@ class APINormalMode {
   async removeTextWithCanvas(ctx, word) {
     const { x0, x1, y0, y1 } = word.bbox;
     const margin = 2;
-    const width = x1 - x0 + margin * 2;
-    const height = y1 - y0 + margin * 2;
 
-    ctx.fillStyle = "white";
-    ctx.fillRect(x0 - margin, y0 - margin, width, height);
+    const imgWidth = ctx.canvas.width;
+    const imgHeight = ctx.canvas.height;
+
+    const validX0 = Math.max(0, Math.min(x0 - margin, imgWidth - 1));
+    const validY0 = Math.max(0, Math.min(y0 - margin, imgHeight - 1));
+    const validX1 = Math.max(0, Math.min(x1 + margin, imgWidth));
+    const validY1 = Math.max(0, Math.min(y1 + margin, imgHeight));
+    const validWidth = validX1 - validX0;
+    const validHeight = validY1 - validY0;
+
+    this.blurAndFadeRegion(ctx, validX0, validY0, validWidth, validHeight);
+  }
+
+  blurAndFadeRegion(ctx, x, y, width, height) {
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+
+    const blurAmount = 10;
+    const fadeFactor = 0.5;
+
+    for (let i = 0; i < data.length; i += 4) {
+      let totalRed = 0,
+        totalGreen = 0,
+        totalBlue = 0;
+      let pixelCount = 0;
+
+      for (let row = -blurAmount; row <= blurAmount; row++) {
+        for (let col = -blurAmount; col <= blurAmount; col++) {
+          const pixelX = Math.min(
+            width - 1,
+            Math.max(0, ((i / 4) % width) + col)
+          );
+          const pixelY = Math.min(
+            height - 1,
+            Math.max(0, Math.floor(i / 4 / width) + row)
+          );
+          const pixelIndex = (pixelY * width + pixelX) * 4;
+
+          totalRed += data[pixelIndex];
+          totalGreen += data[pixelIndex + 1];
+          totalBlue += data[pixelIndex + 2];
+          pixelCount++;
+        }
+      }
+
+      data[i] = Math.min(
+        255,
+        totalRed / pixelCount + (255 - totalRed / pixelCount) * fadeFactor
+      );
+      data[i + 1] = Math.min(
+        255,
+        totalGreen / pixelCount + (255 - totalGreen / pixelCount) * fadeFactor
+      );
+      data[i + 2] = Math.min(
+        255,
+        totalBlue / pixelCount + (255 - totalBlue / pixelCount) * fadeFactor
+      );
+    }
+
+    ctx.putImageData(imageData, x, y);
   }
 
   async drawTranslatedText(ctx, word, translatedText) {
@@ -425,7 +484,7 @@ class APINormalMode {
     const width = x1 - x0;
     const height = y1 - y0;
 
-    ctx.fillStyle = "white";
+    ctx.fillStyle = "rgba(255, 255, 255, 0)";
     ctx.fillRect(x0, y0, width, height);
 
     let fontSize = height * 0.8;
@@ -522,8 +581,10 @@ class APIMergeMode {
     const imageProcessingTasks = imageUrls.map(async (imageUrl) => {
       try {
         logProcess(`Processing image: ${imageUrl}`);
-        const fullTextAnnotation = await this.processImageWithVisionAPI(
-          imageUrl
+        const fullTextAnnotation = await processImageWithVisionAPI(
+          imageUrl,
+          this.apiKey,
+          "TEXT_DETECTION"
         );
         if (!fullTextAnnotation) {
           logError("No text detected in the image.");
@@ -542,7 +603,11 @@ class APIMergeMode {
 
         for (const block of blocks) {
           if (!this.isNumberOrSymbolOrSingleChar(block.text)) {
-            const translatedText = await this.translateText(block.text);
+            const translatedText = await translateText(
+              block.text,
+              this.targetLang,
+              this.apiKey
+            );
             await this.drawTranslatedText(ctx, block, translatedText);
           }
         }
@@ -556,81 +621,6 @@ class APIMergeMode {
     });
 
     await Promise.all(imageProcessingTasks);
-  }
-
-  async processImageWithVisionAPI(imageUrl) {
-    try {
-      logProcess(`Sending image to Vision API: ${imageUrl}`);
-      const imageBase64 = await this.getBase64FromImageUrl(imageUrl);
-      const url = `https://vision.googleapis.com/v1/images:annotate?key=${this.apiKey}`;
-      const requestBody = {
-        requests: [
-          {
-            image: { content: imageBase64 },
-            features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
-          },
-        ],
-      };
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      const data = await response.json();
-      if (data.responses[0].fullTextAnnotation) {
-        return data.responses[0].fullTextAnnotation;
-      } else {
-        throw new Error("No text detected");
-      }
-    } catch (error) {
-      throw new Error(`Vision API error: ${error.message}`);
-    }
-  }
-
-  async getBase64FromImageUrl(url) {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result.split(",")[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  async translateText(text) {
-    try {
-      logProcess(`Translating text: ${text}`);
-      const url = `https://translation.googleapis.com/language/translate/v2?key=${this.apiKey}`;
-      const requestBody = {
-        q: text,
-        target: this.targetLang,
-        format: "text",
-      };
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      const result = await response.json();
-      if (
-        result.data &&
-        result.data.translations &&
-        result.data.translations.length > 0
-      ) {
-        return result.data.translations[0].translatedText;
-      } else {
-        throw new Error("Translation failed");
-      }
-    } catch (error) {
-      throw new Error("Failed to translate text.");
-    }
   }
 
   async getImageUrls() {
@@ -722,14 +712,70 @@ class APIMergeMode {
     return { canvas, ctx };
   }
 
-  async removeTextWithCanvas(ctx, block) {
-    const { x0, x1, y0, y1 } = block.bbox;
+  async removeTextWithCanvas(ctx, word) {
+    const { x0, x1, y0, y1 } = word.bbox;
     const margin = 2;
-    const width = x1 - x0 + margin * 2;
-    const height = y1 - y0 + margin * 2;
 
-    ctx.fillStyle = "white";
-    ctx.fillRect(x0 - margin, y0 - margin, width, height);
+    const imgWidth = ctx.canvas.width;
+    const imgHeight = ctx.canvas.height;
+
+    const validX0 = Math.max(0, Math.min(x0 - margin, imgWidth - 1));
+    const validY0 = Math.max(0, Math.min(y0 - margin, imgHeight - 1));
+    const validX1 = Math.max(0, Math.min(x1 + margin, imgWidth));
+    const validY1 = Math.max(0, Math.min(y1 + margin, imgHeight));
+    const validWidth = validX1 - validX0;
+    const validHeight = validY1 - validY0;
+
+    this.blurAndFadeRegion(ctx, validX0, validY0, validWidth, validHeight);
+  }
+
+  blurAndFadeRegion(ctx, x, y, width, height) {
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+
+    const blurAmount = 10;
+    const fadeFactor = 0.5;
+
+    for (let i = 0; i < data.length; i += 4) {
+      let totalRed = 0,
+        totalGreen = 0,
+        totalBlue = 0;
+      let pixelCount = 0;
+
+      for (let row = -blurAmount; row <= blurAmount; row++) {
+        for (let col = -blurAmount; col <= blurAmount; col++) {
+          const pixelX = Math.min(
+            width - 1,
+            Math.max(0, ((i / 4) % width) + col)
+          );
+          const pixelY = Math.min(
+            height - 1,
+            Math.max(0, Math.floor(i / 4 / width) + row)
+          );
+          const pixelIndex = (pixelY * width + pixelX) * 4;
+
+          totalRed += data[pixelIndex];
+          totalGreen += data[pixelIndex + 1];
+          totalBlue += data[pixelIndex + 2];
+          pixelCount++;
+        }
+      }
+
+      data[i] = Math.min(
+        255,
+        totalRed / pixelCount + (255 - totalRed / pixelCount) * fadeFactor
+      );
+      data[i + 1] = Math.min(
+        255,
+        totalGreen / pixelCount + (255 - totalGreen / pixelCount) * fadeFactor
+      );
+      data[i + 2] = Math.min(
+        255,
+        totalBlue / pixelCount + (255 - totalBlue / pixelCount) * fadeFactor
+      );
+    }
+
+    ctx.putImageData(imageData, x, y);
   }
 
   async drawTranslatedText(ctx, block, translatedText) {
@@ -737,7 +783,7 @@ class APIMergeMode {
     const width = x1 - x0;
     const height = y1 - y0;
 
-    ctx.fillStyle = "white";
+    ctx.fillStyle = "rgba(255, 255, 255, 0)";
     ctx.fillRect(x0, y0, width, height);
 
     let fontSize = Math.min(height * 0.8, 40);
@@ -875,7 +921,7 @@ async function translateText(text, targetLang, apiKey) {
   }
 }
 
-async function processImageWithVisionAPI(imageUrl, apiKey) {
+async function processImageWithVisionAPI(imageUrl, apiKey, features) {
   try {
     logProcess(`Sending image to Vision API: ${imageUrl}`);
     const imageBase64 = await getBase64FromImageUrl(imageUrl);
@@ -884,7 +930,7 @@ async function processImageWithVisionAPI(imageUrl, apiKey) {
       requests: [
         {
           image: { content: imageBase64 },
-          features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+          features: [{ type: features }],
         },
       ],
     };
