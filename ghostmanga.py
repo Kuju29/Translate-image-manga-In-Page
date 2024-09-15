@@ -1,9 +1,9 @@
 from seleniumbase import SB
-from urllib.parse import urlparse
-import requests, base64, time
+import requests, base64, os
 
 original_page_url = ('https://rawkuma.com/takarakuji-de-40-oku-atattandakedo-isekai-ni-ijuu-suru-chapter-84/', '[class*="ts-main-image"]')
 lang = 'th'
+download_image = False
 
 class ImageTranslator:
     def __init__(self, sb_instance):
@@ -36,7 +36,7 @@ class ImageTranslator:
         fileInput.dispatchEvent(new Event('change', { bubbles: true }));
         """, file_input_selector, base64_image) # จำลองการลาก
 
-    def download_blob_image(self, blob_url):
+    def download_blob_image(self, blob_url, index):
         """Fetch the translated image as Base64 from the blob URL."""
         try:
             image_data = self.sb.execute_script("""
@@ -54,6 +54,16 @@ class ImageTranslator:
 
             if image_data:
                 base64_image = image_data.split(',')[1]
+                if download_image:
+                    folder_path = 'downloaded_files'
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+                    file_path = os.path.join(folder_path, f'image_{index}.jpg')
+                    image_data = image_data.split(',')[1]
+                    with open(file_path, 'wb') as f:
+                        f.write(base64.b64decode(image_data))
+                    print(f"Downloaded translated image to {file_path}")
+                        
                 return base64_image
             else:
                 print("Failed to fetch the image data from the blob URL.")
@@ -85,7 +95,7 @@ class ImageTranslator:
             print(f"Translated Blob URL: {translated_image_blob_url}")
 
             base64_translated_image = self.download_blob_image(
-                translated_image_blob_url)
+                translated_image_blob_url, index)
 
             if base64_translated_image:
 
