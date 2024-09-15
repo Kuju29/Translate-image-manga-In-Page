@@ -72,7 +72,7 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ## Screenshots
 
-![image](https://github.com/user-attachments/assets/796514c6-d29f-4572-b2df-14aae1c98a28)
+![image](https://github.com/user-attachments/assets/91b81b3e-b49c-4cb8-a24b-5f663b6aa533)
 ![image](https://github.com/user-attachments/assets/63c7f018-10e1-456d-88d3-cb79577a6e48)
 ![image](https://github.com/user-attachments/assets/50570a94-a518-4e06-86f3-5fbff136d12f)
 
