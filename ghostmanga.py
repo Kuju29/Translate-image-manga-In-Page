@@ -2,16 +2,13 @@ from seleniumbase import SB
 from urllib.parse import urlparse
 import requests, base64, time
 
-original_page_url = ('https://rawkuma.com/takarakuji-de-40-oku-atattandakedo-isekai-ni-ijuu-suru-chapter-85/', '[class*="ts-main-image"]')
+original_page_url = ('https://rawkuma.com/takarakuji-de-40-oku-atattandakedo-isekai-ni-ijuu-suru-chapter-84/', '[class*="ts-main-image"]')
 lang = 'th'
 
 class ImageTranslator:
     def __init__(self, sb_instance):
         self.sb = sb_instance
         self.url_file_map = {}
-
-    def urls_match(url1, url2):
-        return urlparse(url1)._replace(query=None) == urlparse(url2)._replace(query=None)
     
     def download_image_as_base64(self, image_url):
         """Download image from URL and return as Base64."""
@@ -80,7 +77,8 @@ class ImageTranslator:
             base64_image = self.download_image_as_base64(image_url)
             self.drag_and_drop_file(
                 'input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]', base64_image) # <input id="ucj-39" type="file" name="file" class="ZdLswd" accept="image/jpeg, image/png, .jpeg, .jpg, .png" jsname="qGt1Bf" jsaction="change:bK2emb; click:fUEfwd;"> 
-
+            self.sb.sleep(1)
+            
             translated_image = self.sb.wait_for_element_visible(
                 '.CMhTbb.tyW0pd img', timeout=2) # <div class="CMhTbb tyW0pd"><img class="Jmlpdc" loading="lazy" src="blob:https://translate.google.com/a1af381d-235d-4521-aac4-dfe8cee3e964" alt="9
             translated_image_blob_url = translated_image.get_attribute("src")
