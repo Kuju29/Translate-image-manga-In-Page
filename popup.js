@@ -1,6 +1,12 @@
 let apiKey = "";
 let savedClass = "";
 
+const APINormal = "DOCUMENT_TEXT_DETECTION";
+const APIMerge = "TEXT_DETECTION";
+const TextMerge = 50;
+const Verticalboxlength = 50;
+const blockss = false;
+
 document.addEventListener("DOMContentLoaded", () => {
   chrome.storage.local.get(["logs"], function (result) {
     const logs = result.logs || [];
@@ -241,7 +247,7 @@ class APINormalMode {
         const textAnnotations = await processImageWithVisionAPI(
           imageUrl,
           this.apiKey,
-          "DOCUMENT_TEXT_DETECTION"
+          APINormal
         );
         if (!textAnnotations || textAnnotations.length === 0) {
           logError("No text detected in the image.");
@@ -610,33 +616,75 @@ class APIMergeMode {
         const fullTextAnnotation = await processImageWithVisionAPI(
           imageUrl,
           this.apiKey,
-          "DOCUMENT_TEXT_DETECTION"
+          APIMerge
         );
         if (!fullTextAnnotation) {
           logError("No text detected in the image.");
           return;
         }
-
         const blocks = this.extractBlocks(fullTextAnnotation);
 
         const { canvas, ctx } = await this.downloadAndProcessImage(imageUrl);
 
         for (const block of blocks) {
-          if (!this.isNumberOrSymbolOrSingleChar(block.text)) {
-            await this.removeTextWithCanvas(ctx, block);
-          }
+          await this.removeTextWithCanvas(ctx, block);
         }
 
-        for (const block of blocks) {
-          if (!this.isNumberOrSymbolOrSingleChar(block.text)) {
-            const translatedText = await translateText(
-              block.text,
+        const drawDynami = this.drawDynamicBoundingBoxes(
+          ctx,
+          fullTextAnnotation
+        );
+
+        console.log("Starting text translation process...");
+
+        for (let i = 0; i < drawDynami.length; i++) {
+          const { leftX, topY, rightX, bottomY, textInside } = drawDynami[i];
+
+          try {
+            drawDynami[i].translatedText = await translateText(
+              textInside,
               this.targetLang,
               this.apiKey
             );
-            await this.drawTranslatedText(ctx, block, translatedText);
+            console.log(`Translation successful for box ${i}.`);
+          } catch (error) {
+            console.error(`Error translating text for box ${i}:`, error);
+            drawDynami[i].translatedText = null;
           }
         }
+        console.log("Translation process completed.", drawDynami);
+
+        for (let i = 0; i < drawDynami.length; i++) {
+          const { leftX, topY, rightX, bottomY, translatedText } =
+            drawDynami[i];
+
+          if (!translatedText) {
+            console.log(`No translated text for box ${i}, skipping.`);
+            continue;
+          }
+
+          if ([leftX, topY, rightX, bottomY].includes(undefined)) {
+            console.error(
+              `Invalid bounding box coordinates for box ${i}: (${leftX}, ${topY}) to (${rightX}, ${bottomY})`
+            );
+            continue;
+          }
+
+          try {
+            await this.drawTranslatedText(
+              ctx,
+              { bbox: { x0: leftX, y0: topY, x1: rightX, y1: bottomY } },
+              translatedText
+            );
+            console.log(`Successfully drew translated text for box ${i}.`);
+          } catch (error) {
+            console.error(`Error drawing translated text for box ${i}:`, error);
+          }
+        }
+
+        console.log(
+          "Text rendering process completed. Creating image data URL."
+        );
 
         const canvasDataUrl = canvas.toDataURL("image/png");
         await this.replaceImageInPage(imageUrl, canvasDataUrl);
@@ -647,6 +695,194 @@ class APIMergeMode {
     });
 
     await Promise.all(imageProcessingTasks);
+  }
+
+  drawBoundingBox(ctx, bbox, color = "red", lineWidth = 2) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.rect(bbox.x0, bbox.y0, bbox.x1 - bbox.x0, bbox.y1 - bbox.y0);
+    ctx.stroke();
+  }
+
+  mergeBoundingBoxesInXDirection(words, xThreshold = TextMerge) {
+    let mergedBoundingBoxes = [];
+    let currentGroup = [];
+
+    words.forEach((word, index) => {
+      const { x0, y0, x1, y1, text } = word;
+
+      if (currentGroup.length === 0) {
+        currentGroup.push({ x0, y0, x1, y1, text });
+      } else {
+        const previousWord = currentGroup[currentGroup.length - 1];
+        if (Math.abs(previousWord.x1 - x0) <= xThreshold) {
+          currentGroup.push({ x0, y0, x1, y1, text });
+        } else {
+          if (currentGroup.length === 1) {
+            mergedBoundingBoxes.push(currentGroup[0]);
+          } else {
+            const mergedBbox = {
+              x0: Math.min(...currentGroup.map((w) => w.x0)),
+              y0: Math.min(...currentGroup.map((w) => w.y0)),
+              x1: Math.max(...currentGroup.map((w) => w.x1)),
+              y1: Math.max(...currentGroup.map((w) => w.y1)),
+              text: currentGroup.map((w) => w.text).join(" "),
+            };
+            mergedBoundingBoxes.push(mergedBbox);
+          }
+
+          currentGroup = [{ x0, y0, x1, y1, text }];
+        }
+      }
+
+      if (index === words.length - 1 && currentGroup.length > 0) {
+        if (currentGroup.length === 1) {
+          mergedBoundingBoxes.push(currentGroup[0]);
+        } else {
+          const mergedBbox = {
+            x0: Math.min(...currentGroup.map((w) => w.x0)),
+            y0: Math.min(...currentGroup.map((w) => w.y0)),
+            x1: Math.max(...currentGroup.map((w) => w.x1)),
+            y1: Math.max(...currentGroup.map((w) => w.y1)),
+            text: currentGroup.map((w) => w.text).join(" "),
+          };
+          mergedBoundingBoxes.push(mergedBbox);
+        }
+      }
+    });
+
+    return mergedBoundingBoxes;
+  }
+
+  drawDynamicBoundingBoxes(ctx, fullTextAnnotation) {
+    let allWords = [];
+    let usedGroups = [];
+    let drawnBoundingBoxes = [];
+
+    fullTextAnnotation.pages.forEach((page) => {
+      page.blocks.forEach((block) => {
+        block.paragraphs.forEach((paragraph) => {
+          let words = paragraph.words.map((word) => {
+            const vertices = word.boundingBox.vertices;
+            return {
+              x0: vertices[0].x || 0,
+              y0: vertices[0].y || 0,
+              x1: vertices[2].x || 0,
+              y1: vertices[2].y || 0,
+              height: vertices[2].y - vertices[0].y,
+              text: word.symbols.map((symbol) => symbol.text).join(""),
+            };
+          });
+
+          const mergedBoxes = this.mergeBoundingBoxesInXDirection(words);
+
+          mergedBoxes.forEach((box) => allWords.push(box));
+        });
+      });
+    });
+
+    if (allWords.length > 0) {
+      allWords.forEach((box) => {
+        const centerX = (box.x0 + box.x1) / 2;
+        const boxHeight = box.y1 - box.y0;
+
+        const isGroupUsed = usedGroups.some(
+          (group) =>
+            Math.abs(group.centerX - centerX) < 10 &&
+            group.yRange[0] <= box.y1 &&
+            group.yRange[1] >= box.y0
+        );
+
+        if (!isGroupUsed) {
+          let totalHeight = Verticalboxlength;
+          let currentY = box.y0;
+
+          let topY = box.y0;
+          let bottomY = box.y1;
+          let leftX = box.x0;
+          let rightX = box.x1;
+
+          allWords.forEach((innerBox) => {
+            if (centerX >= innerBox.x0 && centerX <= innerBox.x1) {
+              const gap = Math.abs(innerBox.y0 - currentY);
+              if (gap <= boxHeight * 2) {
+                totalHeight += innerBox.y1 - innerBox.y0;
+                currentY = innerBox.y1;
+
+                topY = Math.min(topY, innerBox.y0);
+                bottomY = Math.max(bottomY, innerBox.y1);
+                leftX = Math.min(leftX, innerBox.x0);
+                rightX = Math.max(rightX, innerBox.x1);
+              }
+            }
+          });
+
+          if (blockss) {
+            const endY = currentY + totalHeight;
+
+            ctx.strokeStyle = "green";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(centerX, box.y0);
+            ctx.lineTo(centerX, endY);
+            ctx.stroke();
+
+            ctx.strokeStyle = "red";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.rect(leftX, topY, rightX - leftX, bottomY - topY);
+            ctx.stroke();
+          }
+
+          drawnBoundingBoxes.push({
+            leftX,
+            topY,
+            rightX,
+            bottomY,
+            textInside: this.checkTextInsideBoundingBox(
+              { x0: leftX, y0: topY, x1: rightX, y1: bottomY },
+              allWords
+            ),
+          });
+
+          usedGroups.push({
+            centerX: centerX,
+            yRange: [topY, bottomY],
+          });
+
+          usedGroups = usedGroups.map((group) => ({
+            centerX: group.centerX,
+            yRange: [
+              Math.min(group.yRange[0], topY),
+              Math.max(group.yRange[1], bottomY),
+            ],
+          }));
+        }
+      });
+    }
+
+    return drawnBoundingBoxes;
+  }
+
+  checkTextInsideBoundingBox(mergedBox, allWords) {
+    let textInsideBox = [];
+
+    allWords.forEach((word) => {
+      const { x0, y0, x1, y1, text } = word;
+
+      const isInside =
+        x0 >= mergedBox.x0 &&
+        x1 <= mergedBox.x1 &&
+        y0 >= mergedBox.y0 &&
+        y1 <= mergedBox.y1;
+
+      if (isInside) {
+        textInsideBox.push(text);
+      }
+    });
+
+    return textInsideBox.join(" ");
   }
 
   async getImageUrls() {
@@ -708,7 +944,11 @@ class APIMergeMode {
             blockText += wordText;
           });
         });
+
         const vertices = block.boundingBox.vertices;
+
+        let blockType = "paragraph";
+
         blocks.push({
           text: blockText.trim(),
           bbox: {
@@ -717,6 +957,7 @@ class APIMergeMode {
             x1: vertices[2].x || 0,
             y1: vertices[2].y || 0,
           },
+          type: blockType,
         });
       });
     });
@@ -903,13 +1144,6 @@ class APIMergeMode {
 
   segmentThaiText(text) {
     return text.split("");
-  }
-
-  isNumberOrSymbolOrSingleChar(text) {
-    const isNumber = /^\d+$/.test(text);
-    const isSymbol = /^[!@#\$%\^\&*\)\(+=._-]+$/.test(text);
-    const isSingleChar = text.length <= 1;
-    return isNumber || isSymbol || isSingleChar;
   }
 
   async replaceImageInPage(imageUrl, canvasDataUrl) {
