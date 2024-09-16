@@ -78,5 +78,9 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ---
 
-### Future Updates
-I'll continue refining this project and removing unnecessary code in future updates. Stay tuned!
+## Version Updates
+
+- **v1.3**: Upgraded the Merge mode for improved translation accuracy, but there are still issues with missing text detection and disorganized word groups when applied to images with tightly packed text.
+- **v1.2**: Added a new UI and CSS Selector options.
+- **v1.1**: Implemented image detection on web pages.
+
