@@ -427,53 +427,82 @@ class APINormalMode {
     const validWidth = validX1 - validX0;
     const validHeight = validY1 - validY0;
 
-    this.blurAndFadeRegion(ctx, validX0, validY0, validWidth, validHeight);
+    this.applyMosaicBlurAndWhite(
+      ctx,
+      validX0,
+      validY0,
+      validWidth,
+      validHeight
+    );
   }
 
-  blurAndFadeRegion(ctx, x, y, width, height) {
+  applyMosaicBlurAndWhite(ctx, x, y, width, height) {
     const imageData = ctx.getImageData(x, y, width, height);
     const data = imageData.data;
-
-    const blurAmount = 10;
+    const mosaicSize = 5;
+    const blurAmount = 3;
     const fadeFactor = 0.5;
+    const whiteFactor = 0.3;
 
-    for (let i = 0; i < data.length; i += 4) {
-      let totalRed = 0,
-        totalGreen = 0,
-        totalBlue = 0;
-      let pixelCount = 0;
+    for (let row = 0; row < height; row += mosaicSize) {
+      for (let col = 0; col < width; col += mosaicSize) {
+        let totalRed = 0,
+          totalGreen = 0,
+          totalBlue = 0;
+        let pixelCount = 0;
 
-      for (let row = -blurAmount; row <= blurAmount; row++) {
-        for (let col = -blurAmount; col <= blurAmount; col++) {
-          const pixelX = Math.min(
-            width - 1,
-            Math.max(0, ((i / 4) % width) + col)
-          );
-          const pixelY = Math.min(
-            height - 1,
-            Math.max(0, Math.floor(i / 4 / width) + row)
-          );
-          const pixelIndex = (pixelY * width + pixelX) * 4;
+        for (
+          let mosaicRow = -blurAmount;
+          mosaicRow <= mosaicSize + blurAmount;
+          mosaicRow++
+        ) {
+          for (
+            let mosaicCol = -blurAmount;
+            mosaicCol <= mosaicSize + blurAmount;
+            mosaicCol++
+          ) {
+            const pixelX = Math.min(width - 1, Math.max(0, col + mosaicCol));
+            const pixelY = Math.min(height - 1, Math.max(0, row + mosaicRow));
+            const pixelIndex = (pixelY * width + pixelX) * 4;
 
-          totalRed += data[pixelIndex];
-          totalGreen += data[pixelIndex + 1];
-          totalBlue += data[pixelIndex + 2];
-          pixelCount++;
+            totalRed += data[pixelIndex];
+            totalGreen += data[pixelIndex + 1];
+            totalBlue += data[pixelIndex + 2];
+            pixelCount++;
+          }
+        }
+
+        const avgRed = totalRed / pixelCount;
+        const avgGreen = totalGreen / pixelCount;
+        const avgBlue = totalBlue / pixelCount;
+
+        for (let mosaicRow = 0; mosaicRow < mosaicSize; mosaicRow++) {
+          for (let mosaicCol = 0; mosaicCol < mosaicSize; mosaicCol++) {
+            const pixelX = Math.min(width - 1, col + mosaicCol);
+            const pixelY = Math.min(height - 1, row + mosaicRow);
+            const pixelIndex = (pixelY * width + pixelX) * 4;
+
+            data[pixelIndex] = Math.min(
+              255,
+              avgRed +
+                (255 - avgRed) * whiteFactor +
+                (255 - avgRed) * fadeFactor
+            );
+            data[pixelIndex + 1] = Math.min(
+              255,
+              avgGreen +
+                (255 - avgGreen) * whiteFactor +
+                (255 - avgGreen) * fadeFactor
+            );
+            data[pixelIndex + 2] = Math.min(
+              255,
+              avgBlue +
+                (255 - avgBlue) * whiteFactor +
+                (255 - avgBlue) * fadeFactor
+            );
+          }
         }
       }
-
-      data[i] = Math.min(
-        255,
-        totalRed / pixelCount + (255 - totalRed / pixelCount) * fadeFactor
-      );
-      data[i + 1] = Math.min(
-        255,
-        totalGreen / pixelCount + (255 - totalGreen / pixelCount) * fadeFactor
-      );
-      data[i + 2] = Math.min(
-        255,
-        totalBlue / pixelCount + (255 - totalBlue / pixelCount) * fadeFactor
-      );
     }
 
     ctx.putImageData(imageData, x, y);
@@ -723,53 +752,82 @@ class APIMergeMode {
     const validWidth = validX1 - validX0;
     const validHeight = validY1 - validY0;
 
-    this.blurAndFadeRegion(ctx, validX0, validY0, validWidth, validHeight);
+    this.applyMosaicBlurAndWhite(
+      ctx,
+      validX0,
+      validY0,
+      validWidth,
+      validHeight
+    );
   }
 
-  blurAndFadeRegion(ctx, x, y, width, height) {
+  applyMosaicBlurAndWhite(ctx, x, y, width, height) {
     const imageData = ctx.getImageData(x, y, width, height);
     const data = imageData.data;
-
-    const blurAmount = 10;
+    const mosaicSize = 5;
+    const blurAmount = 3;
     const fadeFactor = 0.5;
+    const whiteFactor = 0.3;
 
-    for (let i = 0; i < data.length; i += 4) {
-      let totalRed = 0,
-        totalGreen = 0,
-        totalBlue = 0;
-      let pixelCount = 0;
+    for (let row = 0; row < height; row += mosaicSize) {
+      for (let col = 0; col < width; col += mosaicSize) {
+        let totalRed = 0,
+          totalGreen = 0,
+          totalBlue = 0;
+        let pixelCount = 0;
 
-      for (let row = -blurAmount; row <= blurAmount; row++) {
-        for (let col = -blurAmount; col <= blurAmount; col++) {
-          const pixelX = Math.min(
-            width - 1,
-            Math.max(0, ((i / 4) % width) + col)
-          );
-          const pixelY = Math.min(
-            height - 1,
-            Math.max(0, Math.floor(i / 4 / width) + row)
-          );
-          const pixelIndex = (pixelY * width + pixelX) * 4;
+        for (
+          let mosaicRow = -blurAmount;
+          mosaicRow <= mosaicSize + blurAmount;
+          mosaicRow++
+        ) {
+          for (
+            let mosaicCol = -blurAmount;
+            mosaicCol <= mosaicSize + blurAmount;
+            mosaicCol++
+          ) {
+            const pixelX = Math.min(width - 1, Math.max(0, col + mosaicCol));
+            const pixelY = Math.min(height - 1, Math.max(0, row + mosaicRow));
+            const pixelIndex = (pixelY * width + pixelX) * 4;
 
-          totalRed += data[pixelIndex];
-          totalGreen += data[pixelIndex + 1];
-          totalBlue += data[pixelIndex + 2];
-          pixelCount++;
+            totalRed += data[pixelIndex];
+            totalGreen += data[pixelIndex + 1];
+            totalBlue += data[pixelIndex + 2];
+            pixelCount++;
+          }
+        }
+
+        const avgRed = totalRed / pixelCount;
+        const avgGreen = totalGreen / pixelCount;
+        const avgBlue = totalBlue / pixelCount;
+
+        for (let mosaicRow = 0; mosaicRow < mosaicSize; mosaicRow++) {
+          for (let mosaicCol = 0; mosaicCol < mosaicSize; mosaicCol++) {
+            const pixelX = Math.min(width - 1, col + mosaicCol);
+            const pixelY = Math.min(height - 1, row + mosaicRow);
+            const pixelIndex = (pixelY * width + pixelX) * 4;
+
+            data[pixelIndex] = Math.min(
+              255,
+              avgRed +
+                (255 - avgRed) * whiteFactor +
+                (255 - avgRed) * fadeFactor
+            );
+            data[pixelIndex + 1] = Math.min(
+              255,
+              avgGreen +
+                (255 - avgGreen) * whiteFactor +
+                (255 - avgGreen) * fadeFactor
+            );
+            data[pixelIndex + 2] = Math.min(
+              255,
+              avgBlue +
+                (255 - avgBlue) * whiteFactor +
+                (255 - avgBlue) * fadeFactor
+            );
+          }
         }
       }
-
-      data[i] = Math.min(
-        255,
-        totalRed / pixelCount + (255 - totalRed / pixelCount) * fadeFactor
-      );
-      data[i + 1] = Math.min(
-        255,
-        totalGreen / pixelCount + (255 - totalGreen / pixelCount) * fadeFactor
-      );
-      data[i + 2] = Math.min(
-        255,
-        totalBlue / pixelCount + (255 - totalBlue / pixelCount) * fadeFactor
-      );
     }
 
     ctx.putImageData(imageData, x, y);
