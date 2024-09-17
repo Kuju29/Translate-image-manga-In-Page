@@ -5,7 +5,9 @@ const APINormal = "DOCUMENT_TEXT_DETECTION";
 const APIMerge = "TEXT_DETECTION";
 const TextMerge = 50;
 const Verticalboxlength = 50;
+const maxYLength = 300;
 const blockss = false;
+const drawText = false;
 
 document.addEventListener("DOMContentLoaded", () => {
   chrome.storage.local.get(["logs"], function (result) {
@@ -622,6 +624,7 @@ class APIMergeMode {
           logError("No text detected in the image.");
           return;
         }
+
         const blocks = this.extractBlocks(fullTextAnnotation);
 
         const { canvas, ctx } = await this.downloadAndProcessImage(imageUrl);
@@ -697,7 +700,7 @@ class APIMergeMode {
     await Promise.all(imageProcessingTasks);
   }
 
-  drawBoundingBox(ctx, bbox, color = "red", lineWidth = 2) {
+  drawBoundingBox(ctx, bbox, color = "blue", lineWidth = 2) {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     ctx.beginPath();
@@ -705,19 +708,36 @@ class APIMergeMode {
     ctx.stroke();
   }
 
+  drawTextInBoundingBox = function (ctx, text, box) {
+    const { x0, x1, y0, y1 } = box;
+    const width = x1 - x0;
+    const height = y1 - y0;
+
+    let fontSize = Math.min(height * 0.8, 40);
+    ctx.font = `${fontSize}px Arial`;
+
+    const textMetrics = ctx.measureText(text);
+    const textX = x0 + (width - textMetrics.width) / 2;
+    const textY = y1 - height * 0.2;
+
+    ctx.fillStyle = "blue";
+    ctx.fillText(text, textX, textY);
+  };
+
   mergeBoundingBoxesInXDirection(words, xThreshold = TextMerge) {
     let mergedBoundingBoxes = [];
     let currentGroup = [];
+    let boxIndex = 0;
 
     words.forEach((word, index) => {
       const { x0, y0, x1, y1, text } = word;
 
       if (currentGroup.length === 0) {
-        currentGroup.push({ x0, y0, x1, y1, text });
+        currentGroup.push({ x0, y0, x1, y1, text, index: [index] });
       } else {
         const previousWord = currentGroup[currentGroup.length - 1];
         if (Math.abs(previousWord.x1 - x0) <= xThreshold) {
-          currentGroup.push({ x0, y0, x1, y1, text });
+          currentGroup.push({ x0, y0, x1, y1, text, index: [index] });
         } else {
           if (currentGroup.length === 1) {
             mergedBoundingBoxes.push(currentGroup[0]);
@@ -728,11 +748,11 @@ class APIMergeMode {
               x1: Math.max(...currentGroup.map((w) => w.x1)),
               y1: Math.max(...currentGroup.map((w) => w.y1)),
               text: currentGroup.map((w) => w.text).join(" "),
+              index: currentGroup.flatMap((w) => w.index),
             };
             mergedBoundingBoxes.push(mergedBbox);
           }
-
-          currentGroup = [{ x0, y0, x1, y1, text }];
+          currentGroup = [{ x0, y0, x1, y1, text, index: [index] }];
         }
       }
 
@@ -746,6 +766,7 @@ class APIMergeMode {
             x1: Math.max(...currentGroup.map((w) => w.x1)),
             y1: Math.max(...currentGroup.map((w) => w.y1)),
             text: currentGroup.map((w) => w.text).join(" "),
+            index: currentGroup.flatMap((w) => w.index),
           };
           mergedBoundingBoxes.push(mergedBbox);
         }
@@ -759,68 +780,121 @@ class APIMergeMode {
     let allWords = [];
     let usedGroups = [];
     let drawnBoundingBoxes = [];
+    let taggedBoxes = new Set();
 
     fullTextAnnotation.pages.forEach((page) => {
       page.blocks.forEach((block) => {
         block.paragraphs.forEach((paragraph) => {
-          let words = paragraph.words.map((word) => {
-            const vertices = word.boundingBox.vertices;
-            return {
-              x0: vertices[0].x || 0,
-              y0: vertices[0].y || 0,
-              x1: vertices[2].x || 0,
-              y1: vertices[2].y || 0,
-              height: vertices[2].y - vertices[0].y,
-              text: word.symbols.map((symbol) => symbol.text).join(""),
-            };
-          });
+          let words = paragraph.words
+            .map((word) => {
+              const vertices = word.boundingBox.vertices;
+              const text = word.symbols.map((symbol) => symbol.text).join("");
+
+              if (text.trim() === "") {
+                console.log("ข้ามกล่องที่ไม่มีข้อความ:", vertices);
+                return null;
+              }
+
+              return {
+                x0: vertices[0].x || 0,
+                y0: vertices[0].y || 0,
+                x1: vertices[2].x || 0,
+                y1: vertices[2].y || 0,
+                height: vertices[2].y - vertices[0].y,
+                text: text,
+                tagged: false,
+              };
+            })
+            .filter((word) => word !== null);
 
           const mergedBoxes = this.mergeBoundingBoxesInXDirection(words);
 
           mergedBoxes.forEach((box) => allWords.push(box));
+
+          if (blockss) {
+            mergedBoxes.forEach((bbox) => {
+              this.drawBoundingBox(ctx, bbox, "blue", 2);
+              console.log(
+                `Merged Bounding Box: (${bbox.x0}, ${bbox.y0}) to (${bbox.x1}, ${bbox.y1})`
+              );
+              if (drawText) {
+                this.drawTextInBoundingBox(ctx, bbox.text, bbox);
+              }
+            });
+          }
         });
       });
     });
 
-    if (allWords.length > 0) {
-      allWords.forEach((box) => {
-        const centerX = (box.x0 + box.x1) / 2;
-        const boxHeight = box.y1 - box.y0;
+    allWords.forEach((box) => {
+      const centerX = (box.x0 + box.x1) / 2;
+      const boxHeight = box.y1 - box.y0;
 
-        const isGroupUsed = usedGroups.some(
-          (group) =>
-            Math.abs(group.centerX - centerX) < 10 &&
-            group.yRange[0] <= box.y1 &&
-            group.yRange[1] >= box.y0
-        );
+      if (taggedBoxes.has(box.index)) {
+        return;
+      }
 
-        if (!isGroupUsed) {
-          let totalHeight = Verticalboxlength;
-          let currentY = box.y0;
+      const isGroupUsed = usedGroups.some(
+        (group) =>
+          Math.abs(group.centerX - centerX) < 10 &&
+          group.yRange[0] <= box.y1 &&
+          group.yRange[1] >= box.y0
+      );
 
-          let topY = box.y0;
-          let bottomY = box.y1;
-          let leftX = box.x0;
-          let rightX = box.x1;
+      if (!isGroupUsed) {
+        let totalHeight = 0;
+        let currentY = box.y0;
 
-          allWords.forEach((innerBox) => {
-            if (centerX >= innerBox.x0 && centerX <= innerBox.x1) {
-              const gap = Math.abs(innerBox.y0 - currentY);
-              if (gap <= boxHeight * 2) {
-                totalHeight += innerBox.y1 - innerBox.y0;
-                currentY = innerBox.y1;
+        let topY = box.y0;
+        let bottomY = box.y1;
+        let leftX = box.x0;
+        let rightX = box.x1;
 
-                topY = Math.min(topY, innerBox.y0);
-                bottomY = Math.max(bottomY, innerBox.y1);
-                leftX = Math.min(leftX, innerBox.x0);
-                rightX = Math.max(rightX, innerBox.x1);
-              }
+        allWords.forEach((innerBox) => {
+          if (
+            !taggedBoxes.has(innerBox.index) &&
+            centerX >= innerBox.x0 &&
+            centerX <= innerBox.x1
+          ) {
+            const gap = Math.abs(innerBox.y0 - currentY);
+            if (gap <= boxHeight * 2) {
+              totalHeight += innerBox.y1 - innerBox.y0;
+              currentY = innerBox.y1;
+
+              topY = Math.min(topY, innerBox.y0);
+              bottomY = Math.max(bottomY, innerBox.y1);
+              leftX = Math.min(leftX, innerBox.x0);
+              rightX = Math.max(rightX, innerBox.x1);
+
+              taggedBoxes.add(innerBox.index);
             }
+          }
+        });
+
+        const isOverlapping = drawnBoundingBoxes.some((existingBox) => {
+          return (
+            topY < existingBox.bottomY &&
+            bottomY > existingBox.topY &&
+            leftX < existingBox.rightX &&
+            rightX > existingBox.leftX
+          );
+        });
+
+        if (isOverlapping) {
+          console.log("พบการทับซ้อนกับกล่องอื่น: ยกเลิกการสร้างกล่องใหม่");
+          drawnBoundingBoxes.push({
+            leftX: box.x0,
+            topY: box.y0,
+            rightX: box.x1,
+            bottomY: box.y1,
+            textInside: box.text,
           });
+          return;
+        }
 
+        if (bottomY - topY <= maxYLength) {
           if (blockss) {
-            const endY = currentY + totalHeight;
-
+            const endY = bottomY + (box.y0 - topY);
             ctx.strokeStyle = "green";
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -844,6 +918,7 @@ class APIMergeMode {
               { x0: leftX, y0: topY, x1: rightX, y1: bottomY },
               allWords
             ),
+            tagged: true,
           });
 
           usedGroups.push({
@@ -858,9 +933,49 @@ class APIMergeMode {
               Math.max(group.yRange[1], bottomY),
             ],
           }));
+        } else {
+          console.log(
+            `ข้ามการสร้างกล่องที่มีเส้นแกน y ยาวเกินไป (${bottomY - topY} px)`
+          );
+
+          allWords.forEach((innerBox, innerIndex) => {
+            if (
+              !taggedBoxes.has(innerIndex) &&
+              centerX >= innerBox.x0 &&
+              centerX <= innerBox.x1 &&
+              innerBox.y0 >= topY &&
+              innerBox.y1 <= bottomY
+            ) {
+              drawnBoundingBoxes.push({
+                leftX: innerBox.x0,
+                topY: innerBox.y0,
+                rightX: innerBox.x1,
+                bottomY: innerBox.y1,
+                textInside: innerBox.text,
+                tagged: true,
+              });
+
+              taggedBoxes.add(innerIndex);
+            }
+          });
         }
-      });
-    }
+      }
+    });
+
+    allWords.forEach((box) => {
+      if (!taggedBoxes.has(box.index)) {
+        console.log(
+          `กล่องข้อความที่ไม่ได้ใช้: (${box.x0}, ${box.y0}) to (${box.x1}, ${box.y1})`
+        );
+        drawnBoundingBoxes.push({
+          leftX: box.x0,
+          topY: box.y0,
+          rightX: box.x1,
+          bottomY: box.y1,
+          textInside: box.text,
+        });
+      }
+    });
 
     return drawnBoundingBoxes;
   }
@@ -1081,7 +1196,9 @@ class APIMergeMode {
 
     let fontSize = Math.min(height * 0.8, 40);
 
-    const minFontSize = 12;
+    const minFontSize = 16;
+    const maxFontSize = 40;
+
     if (fontSize < minFontSize) {
       fontSize = minFontSize;
     }
@@ -1105,6 +1222,13 @@ class APIMergeMode {
       }
     }
 
+    if (fontSize <= minFontSize) {
+      console.log("ขนาดฟอนต์ต่ำกว่าค่าที่กำหนด วาดข้อความทับขอบเขตของกล่อง");
+      fontSize = minFontSize;
+      ctx.font = `${fontSize}px Arial`;
+      lineHeight = fontSize * 1.2;
+    }
+
     ctx.fillStyle = "black";
 
     let startY = y0 + (height - totalTextHeight) / 2 + lineHeight * 0.8;
@@ -1118,8 +1242,25 @@ class APIMergeMode {
     }
   }
 
+  splitTextUsingIntl(text) {
+    const segmenter = new Intl.Segmenter(this.targetLang, {
+      granularity: "word",
+    });
+    const segments = segmenter.segment(text);
+
+    const words = [];
+    for (const { segment, isWordLike } of segments) {
+      if (isWordLike || /[.,!?;:]/.test(segment)) {
+        words.push(segment.trim());
+      } else {
+        words.push(segment);
+      }
+    }
+    return words;
+  }
+
   wrapText(ctx, text, maxWidth) {
-    const words = this.segmentThaiText(text);
+    const words = this.splitTextUsingIntl(text);
     const lines = [];
     let line = "";
 
@@ -1129,21 +1270,18 @@ class APIMergeMode {
       const testWidth = metrics.width;
 
       if (testWidth > maxWidth && line !== "") {
-        lines.push(line);
+        lines.push(line.trim());
         line = words[i];
       } else {
         line = testLine;
       }
     }
+
     if (line !== "") {
-      lines.push(line);
+      lines.push(line.trim());
     }
 
     return lines;
-  }
-
-  segmentThaiText(text) {
-    return text.split("");
   }
 
   async replaceImageInPage(imageUrl, canvasDataUrl) {
