@@ -13,8 +13,14 @@ This Chrome extension finds the URLs of images on a page using a specified class
 
 1. **Google Chrome**
 2. Install the Chrome extension: [Allow CORS: Access-Control-Allow-Origin](https://chromewebstore.google.com/detail/allow-cors-access-control/lhobafahddgcelffkeicbaginigeejlf) and enable it.
-3. Get a [Google API Key](https://console.cloud.google.com/apis/credentials) for OCR and translation services.
-4. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images as links**.
+3. Go to [API & Services > Library](https://console.cloud.google.com/apis/library) in the Google Cloud Console.
+   - Search for **Vision API** and click to enable it.
+   - Search for **Translate API** and click to enable it.
+4. fter enabling the APIs, go to [API & Services > Credentials](https://console.cloud.google.com/apis/credentials) to create your API key:
+   - Click on **Create Credentials**.
+   - Select **API Key**.
+   - Copy the API Key and save it securely.
+5. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images as links**.
 
 ---
 
