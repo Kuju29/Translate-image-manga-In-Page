@@ -12,15 +12,13 @@ This Chrome extension finds the URLs of images on a page using a specified class
 ## Requirements
 
 1. **Google Chrome**
-2. Install the Chrome extension: [Allow CORS: Access-Control-Allow-Origin](https://chromewebstore.google.com/detail/allow-cors-access-control/lhobafahddgcelffkeicbaginigeejlf) and enable it.
-3. Go to [API & Services > Library](https://console.cloud.google.com/apis/library) in the Google Cloud Console.
+2. Go to [API & Services > Library](https://console.cloud.google.com/apis/library) in the Google Cloud Console.
    - Search for **Vision API** and click to enable it.
-   - Search for **Translate API** and click to enable it.
-4. fter enabling the APIs, go to [API & Services > Credentials](https://console.cloud.google.com/apis/credentials) to create your API key:
+3. fter enabling the APIs, go to [API & Services > Credentials](https://console.cloud.google.com/apis/credentials) to create your API key:
    - Click on **Create Credentials**.
    - Select **API Key**.
    - Copy the API Key and save it securely.
-5. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images as links**.
+4. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images as links**.
 
 ---
 
@@ -86,6 +84,7 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ## Version Updates
 
+- **v1.4**: Will add free OCR but it is not available yet.
 - **v1.3**: Upgraded the Merge mode for improved translation accuracy, but there are still issues with missing text detection and disorganized word groups when applied to images with tightly packed text. (I have fixed these issues.)
 - **v1.2**: Added a new UI and CSS Selector options.
 - **v1.1**: Implemented image detection on web pages.
