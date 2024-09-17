@@ -270,8 +270,7 @@ class APINormalMode {
           if (!this.isNumberOrSymbolOrSingleChar(word.text)) {
             const translatedText = await translateText(
               word.text,
-              this.targetLang,
-              this.apiKey
+              this.targetLang
             );
             await this.drawTranslatedText(ctx, word, translatedText);
           }
@@ -646,8 +645,7 @@ class APIMergeMode {
           try {
             drawDynami[i].translatedText = await translateText(
               textInside,
-              this.targetLang,
-              this.apiKey
+              this.targetLang
             );
             console.log(`Translation successful for box ${i}.`);
           } catch (error) {
@@ -1312,35 +1310,24 @@ class APIMergeMode {
   }
 }
 
-async function translateText(text, targetLang, apiKey) {
+async function translateText(text, targetLang) {
   try {
     logProcess(`Translating text: ${text}`);
-    const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
-    const requestBody = {
-      q: text,
-      target: targetLang,
-      format: "text",
-    };
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
+    const encodedText = encodeURIComponent(text);
 
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodedText}`;
+
+    const response = await fetch(url);
     const result = await response.json();
-    if (
-      result.data &&
-      result.data.translations &&
-      result.data.translations.length > 0
-    ) {
-      return result.data.translations[0].translatedText;
+
+    if (result && result[0] && result[0][0] && result[0][0][0]) {
+      return result[0][0][0];
     } else {
       throw new Error("Translation failed");
     }
   } catch (error) {
+    logError("Failed to translate text.");
     throw new Error("Failed to translate text.");
   }
 }
