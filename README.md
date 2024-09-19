@@ -67,13 +67,6 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ---
 
-### Important Notes
-
-- This extension hasn't been tested on many websites yet, so there may be edge cases where it doesn't work as expected.
-- After you're done using the extension, make sure to disable the **Allow CORS: Access-Control-Allow-Origin** Chrome extension to avoid issues with other websites.
-
----
-
 ## Screenshots
 
 ![image](https://github.com/user-attachments/assets/91b81b3e-b49c-4cb8-a24b-5f663b6aa533)
@@ -88,4 +81,12 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 - **v1.3**: Upgraded the Merge mode for improved translation accuracy, but there are still issues with missing text detection and disorganized word groups when applied to images with tightly packed text. (I have fixed these issues.)
 - **v1.2**: Added a new UI and CSS Selector options.
 - **v1.1**: Implemented image detection on web pages.
+
+---
+
+### [Ghost Manga](https://github.com/Kuju29/Translate-image-manga-In-Page/blob/main/ghostmanga.py)
+
+Ghost Manga UI v1.2: [Link](https://www.mediafire.com/file/2ykaptv5tgs317g/Ghost+Manga+UI+v1.2.exe/file)
+
+![image](https://github.com/user-attachments/assets/23560443-4057-4442-a7cd-088ed53487b3)
 
