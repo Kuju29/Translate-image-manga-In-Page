@@ -38,6 +38,13 @@ This Chrome extension finds the URLs of images on a page using a specified class
 4. Select Folder `Translate-image-manga-In-Page-main`
 5. Done! Your extension is ready to use.
 
+
+#### If you need a permanent extension:
+1. Go to the Translate-image-manga-In-Page folder.
+2. Compress all the files inside, including any subfolders, into a .zip file.
+3. Drag the .zip file into chrome://extensions/.
+4. Done.
+
 ---
 
 ## Version Updates
