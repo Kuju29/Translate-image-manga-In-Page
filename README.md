@@ -1,4 +1,4 @@
-# Translate Images in Manga In-Page
+# Translate Images in Manga In-Page "Extension" and "Program"
 
 ### [Watch the Demo](https://youtu.be/EVLBudGqJ9k)
 
@@ -21,6 +21,31 @@ This Chrome extension finds the URLs of images on a page using a specified class
    - Select **API Key**.
    - Copy the API Key and save it securely.
 4. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images and Protected websites**.
+
+---
+
+## Download & Setup
+
+1. [Download the extension](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
+2. Unzip the downloaded file: `Translate-image-manga-In-Page-main.zip`
+---
+
+## Installation Steps
+
+1. Open Chrome and go to `chrome://extensions/`
+2. Enable `Developer Mode`
+3. Cilck `Load unpacked`
+4. Select Folder `Translate-image-manga-In-Page-main`
+5. Done! Your extension is ready to use.
+
+---
+
+## Version Updates
+
+- **v1.4**: Will add free OCR but it is not available yet.
+- **v1.3**: Upgraded the Merge mode for improved translation accuracy, but there are still issues with missing text detection and disorganized word groups when applied to images with tightly packed text. (I have fixed these issues.)
+- **v1.2**: Added a new UI and CSS Selector options.
+- **v1.1**: Implemented image detection on web pages.
 
 ---
 
@@ -51,38 +76,11 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ---
 
-## Download & Setup
-
-1. [Download the extension](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
-2. Unzip the downloaded file: `Translate-image-manga-In-Page-main`
-3. Compress all the files in the folder to make them ready for installation in Google Chrome.
-![image](https://github.com/user-attachments/assets/6aa87cda-220f-4ea9-b922-c3312f113780)
----
-
-## Installation Steps
-
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable **Developer Mode**
-3. Drag and drop the zipped file into the `chrome://extensions/` page
-4. Click the extensions icon, input your API key and other necessary data
-5. Done! Your extension is ready to use.
-
----
-
 ## Screenshots
 
 ![image](https://github.com/user-attachments/assets/91b81b3e-b49c-4cb8-a24b-5f663b6aa533)
 ![image](https://github.com/user-attachments/assets/63c7f018-10e1-456d-88d3-cb79577a6e48)
 ![image](https://github.com/user-attachments/assets/50570a94-a518-4e06-86f3-5fbff136d12f)
-
----
-
-## Version Updates
-
-- **v1.4**: Will add free OCR but it is not available yet.
-- **v1.3**: Upgraded the Merge mode for improved translation accuracy, but there are still issues with missing text detection and disorganized word groups when applied to images with tightly packed text. (I have fixed these issues.)
-- **v1.2**: Added a new UI and CSS Selector options.
-- **v1.1**: Implemented image detection on web pages.
 
 ---
 
