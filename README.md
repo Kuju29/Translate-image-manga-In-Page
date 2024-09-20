@@ -4,6 +4,8 @@
 
 I created this extension for personal use, but feel free to take this idea and improve upon it. The project was built entirely using ChatGPT, and while some of the code may be unnecessary, I decided to leave it as is for now. Future updates will refine and optimize the code further.
 
+I have made two versions: 'Translate-image-manga-In-Page,' which is an extension that requires the Google API and comes with costs, and 'ghostmanga.py,' which is a script with a UI that's free and easy to use. The details are below. I created them because they share the same code structure but are used differently. I hope everyone will like them.
+
 ### Working Principle
 This Chrome extension finds the URLs of images on a page using a specified class, performs OCR (Optical Character Recognition) on those images, translates the text, and replaces the original images with new, translated versions.
 
