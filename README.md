@@ -18,7 +18,7 @@ This Chrome extension finds the URLs of images on a page using a specified class
    - Click on **Create Credentials**.
    - Select **API Key**.
    - Copy the API Key and save it securely.
-4. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images as links**.
+4. Ensure **all images** have the same class. This extension **cannot be used on websites that use blob images and Protected websites**.
 
 ---
 
@@ -86,7 +86,7 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ### [Ghost Manga](https://github.com/Kuju29/Translate-image-manga-In-Page/blob/main/ghostmanga.py)
 
-Ghost Manga UI v1.2.1: [https://www.mediafire.com/folder/noa4r4nlh298b/Ghost+manga](https://www.mediafire.com/folder/noa4r4nlh298b/Ghost+manga)
+Ghost Manga UI v1.2.1: [https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga](https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga)
 
 ![image](https://github.com/user-attachments/assets/23560443-4057-4442-a7cd-088ed53487b3)
 
