@@ -13,13 +13,27 @@ class ImageTranslator:
         self.download_image = download_image
         self.url_file_map = {}
 
-    def download_image_as_base64(self, image_url):
-        """Download image from URL and return as Base64."""
-        response = requests.get(image_url)
-        if response.status_code == 200:
-            return base64.b64encode(response.content).decode('utf-8')
-        else:
-            return Exception(f"Failed to download_image_as_base64 from {image_url}")
+    def download_image_as_base64(self, image_url, retries=3, delay=10):
+        """
+        Download image from URL and return as Base64. 
+        Retries the download up to `retries` times with `delay` seconds between attempts.
+        """
+        for attempt in range(retries):
+            try:
+                response = requests.get(image_url)
+                if response.status_code == 200:
+                    return base64.b64encode(response.content).decode('utf-8')
+                else:
+                    logging.error(f"Attempt {attempt + 1} failed: {response.status_code} for {image_url}")
+            except Exception as e:
+                logging.error(f"Attempt {attempt + 1} failed with exception: {e}")
+            
+            if attempt < retries - 1:
+                logging.info(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+        
+        logging.error(f"Failed to download_image_as_base64 from {image_url} after {retries} attempts.")
+        return None
 
     def drag_and_drop_file(self, file_input_selector, base64_image):
         """Simulate drag and drop of a Base64 image directly."""
