@@ -8,7 +8,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function replaceImagesInBackground(imageUrl, canvasDataUrl) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs || tabs.length === 0 || !tabs[0].id) {
-      console.error("No active tab found or invalid tab id.");
+      // console.error("No active tab found or invalid tab id.");
       return;
     }
 
