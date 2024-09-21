@@ -277,7 +277,11 @@ class APINormalMode {
         }
 
         const canvasDataUrl = canvas.toDataURL("image/png");
-        await this.replaceImageInPage(imageUrl, canvasDataUrl);
+        chrome.runtime.sendMessage({
+          type: "replaceImage",
+          imageUrl,
+          canvasDataUrl,
+        });
         logProcess(`Finished processing image: ${imageUrl}`);
       } catch (error) {
         logError(error.message);
@@ -566,33 +570,6 @@ class APINormalMode {
     }
     ctx.fillText(line, x, y);
   }
-
-  async replaceImageInPage(imageUrl, canvasDataUrl) {
-    chrome.scripting.executeScript({
-      target: { tabId: this.tabs[0].id },
-      func: function (imageUrl, canvasDataUrl) {
-        const img = document.querySelector(
-          `img[src="${imageUrl}"], img[data-src="${imageUrl}"], img[data-lazy="${imageUrl}"]`
-        );
-        if (img) {
-          img.src = canvasDataUrl;
-          img.setAttribute("data-src", canvasDataUrl);
-          img.setAttribute("data-lazy", canvasDataUrl);
-
-          img.classList.remove("lazyload", "lazyloaded");
-
-          if (img.hasAttribute("data-srcset")) {
-            img.setAttribute("data-srcset", canvasDataUrl);
-          }
-          if (img.hasAttribute("srcset")) {
-            img.setAttribute("srcset", canvasDataUrl);
-          }
-        } else {
-        }
-      },
-      args: [imageUrl, canvasDataUrl],
-    });
-  }
 }
 
 class APIMergeMode {
@@ -688,7 +665,11 @@ class APIMergeMode {
         );
 
         const canvasDataUrl = canvas.toDataURL("image/png");
-        await this.replaceImageInPage(imageUrl, canvasDataUrl);
+        chrome.runtime.sendMessage({
+          type: "replaceImage",
+          imageUrl,
+          canvasDataUrl,
+        });
         logProcess(`Finished processing image: ${imageUrl}`);
       } catch (error) {
         logError(error.message);
@@ -1280,33 +1261,6 @@ class APIMergeMode {
     }
 
     return lines;
-  }
-
-  async replaceImageInPage(imageUrl, canvasDataUrl) {
-    chrome.scripting.executeScript({
-      target: { tabId: this.tabs[0].id },
-      func: function (imageUrl, canvasDataUrl) {
-        const img = document.querySelector(
-          `img[src="${imageUrl}"], img[data-src="${imageUrl}"], img[data-lazy="${imageUrl}"]`
-        );
-        if (img) {
-          img.src = canvasDataUrl;
-          img.setAttribute("data-src", canvasDataUrl);
-          img.setAttribute("data-lazy", canvasDataUrl);
-
-          img.classList.remove("lazyload", "lazyloaded");
-
-          if (img.hasAttribute("data-srcset")) {
-            img.setAttribute("data-srcset", canvasDataUrl);
-          }
-          if (img.hasAttribute("srcset")) {
-            img.setAttribute("srcset", canvasDataUrl);
-          }
-        } else {
-        }
-      },
-      args: [imageUrl, canvasDataUrl],
-    });
   }
 }
 
