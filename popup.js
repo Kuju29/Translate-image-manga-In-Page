@@ -245,12 +245,28 @@ class APINormalMode {
 
     const imageProcessingTasks = imageUrls.map(async (imageUrl) => {
       try {
+        const keyLength = this.apiKey.length;
+        let textAnnotations;
+        if (keyLength >= 34 && keyLength <= 44) {
+          logProcess(`Use Vision API Key`);
+          textAnnotations = await processImageWithVisionAPI(
+            imageUrl,
+            this.apiKey,
+            APINormal
+          );
+        } else if (keyLength >= 10 && keyLength <= 20) {
+          logProcess(`Use OCR.space Key`);
+          textAnnotations = await processImageWithOCRSpace(
+            imageUrl,
+            this.apiKey
+          );
+        } else {
+          logError("Unknown Key");
+          return;
+        }
+
         logProcess(`Processing image: ${imageUrl}`);
-        const textAnnotations = await processImageWithVisionAPI(
-          imageUrl,
-          this.apiKey,
-          APINormal
-        );
+        
         if (!textAnnotations || textAnnotations.length === 0) {
           logError("No text detected in the image.");
           return;
@@ -590,12 +606,28 @@ class APIMergeMode {
 
     const imageProcessingTasks = imageUrls.map(async (imageUrl) => {
       try {
+        const keyLength = this.apiKey.length;
+        let fullTextAnnotation;
+        if (keyLength >= 34 && keyLength <= 44) {
+          logProcess(`Use Vision API Key`);
+          fullTextAnnotation = await processImageWithVisionAPI(
+            imageUrl,
+            this.apiKey,
+            APINormal
+          );
+        } else if (keyLength >= 10 && keyLength <= 20) {
+          logProcess(`Use OCR.space Key`);
+          fullTextAnnotation = await processImageWithOCRSpace(
+            imageUrl,
+            this.apiKey
+          );
+        } else {
+          logError("Unknown Key");
+          return;
+        }
+
         logProcess(`Processing image: ${imageUrl}`);
-        const fullTextAnnotation = await processImageWithVisionAPI(
-          imageUrl,
-          this.apiKey,
-          APIMerge
-        );
+
         if (!fullTextAnnotation) {
           logError("No text detected in the image.");
           return;
@@ -1315,6 +1347,121 @@ async function processImageWithVisionAPI(imageUrl, apiKey, features) {
   } catch (error) {
     throw new Error(`Vision API error: ${error.message}`);
   }
+}
+
+async function processImageWithOCRSpace(imageUrl, apiKey) {
+  try {
+    logProcess(`Sending image to OCRSpace API: ${imageUrl}`);
+    const imageBase64 = await getBase64FromImageUrl(imageUrl);
+    const url = "https://api.ocr.space/parse/image";
+    const formData = new FormData();
+    formData.append("base64Image", `data:image/png;base64,${imageBase64}`);
+    formData.append("isOverlayRequired", "true");
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: formData,
+      headers: {
+        apikey: apiKey,
+      },
+    });
+
+    const data = await response.json();
+    console.log("Full OCR.space response:", JSON.stringify(data, null, 2));
+
+    if (
+      data.ParsedResults &&
+      data.ParsedResults.length > 0 &&
+      data.ParsedResults[0].TextOverlay &&
+      data.ParsedResults[0].TextOverlay.Lines
+    ) {
+      return transformOCRSpaceToVisionAPI(data);
+    } else {
+      const errorMessage =
+        data.ErrorMessage || "No text detected or unexpected structure.";
+      console.error(`OCRSpace error: ${errorMessage}`);
+      throw new Error(`OCRSpace error: ${errorMessage}`);
+    }
+  } catch (error) {
+    console.error(`OCRSpace error: ${error.message}`);
+    throw new Error(`OCRSpace error: ${error.message}`);
+  }
+}
+
+function transformOCRSpaceToVisionAPI(data) {
+  if (
+    !data.ParsedResults ||
+    !data.ParsedResults[0].TextOverlay ||
+    !data.ParsedResults[0].TextOverlay.Lines
+  ) {
+    throw new Error(
+      "No text detected or invalid response structure from OCR.space."
+    );
+  }
+
+  const lines = data.ParsedResults[0].TextOverlay.Lines;
+  const fullTextAnnotation = {
+    pages: [{ blocks: [] }],
+    text: "",
+  };
+
+  lines.forEach((line) => {
+    const block = {
+      paragraphs: [],
+      boundingBox: { vertices: [] },
+    };
+
+    const paragraph = {
+      boundingBox: { vertices: [] },
+      words: [],
+    };
+
+    line.Words.forEach((word) => {
+      const wordObj = {
+        boundingBox: {
+          vertices: [
+            { x: word.Left, y: word.Top },
+            { x: word.Left + word.Width, y: word.Top },
+            { x: word.Left + word.Width, y: word.Top + word.Height },
+            { x: word.Left, y: word.Top + word.Height },
+          ],
+        },
+        symbols: [],
+        text: word.WordText,
+      };
+
+      word.WordText.split("").forEach((char) => {
+        const symbolObj = { text: char, boundingBox: wordObj.boundingBox };
+        wordObj.symbols.push(symbolObj);
+      });
+
+      fullTextAnnotation.text += word.WordText + " ";
+      paragraph.words.push(wordObj);
+    });
+
+    paragraph.boundingBox.vertices = [
+      { x: Math.min(...line.Words.map((w) => w.Left)), y: line.MinTop },
+      {
+        x: Math.max(...line.Words.map((w) => w.Left + w.Width)),
+        y: line.MinTop,
+      },
+      {
+        x: Math.max(...line.Words.map((w) => w.Left + w.Width)),
+        y: line.MinTop + line.MaxHeight,
+      },
+      {
+        x: Math.min(...line.Words.map((w) => w.Left)),
+        y: line.MinTop + line.MaxHeight,
+      },
+    ];
+
+    block.paragraphs.push(paragraph);
+    block.boundingBox.vertices = paragraph.boundingBox.vertices;
+    fullTextAnnotation.pages[0].blocks.push(block);
+  });
+
+  fullTextAnnotation.text = fullTextAnnotation.text.trim();
+  return fullTextAnnotation;
 }
 
 async function getBase64FromImageUrl(url) {
