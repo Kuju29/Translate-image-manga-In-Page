@@ -1,4 +1,5 @@
-from seleniumbase import SB
+from selenium.webdriver.common.by import By
+from seleniumbase import Driver, SB
 import requests, base64, os
 
 page_url = 'https://manhwabtt.cc/manga/dame-skill-auto-mode-ga-kakuseishimashita-are-guild-no-scout-san-ore-wo-iranai-tte-itte-masendeshita/chapter-57-eng-li/757961'
@@ -15,11 +16,22 @@ class ImageTranslator:
 
     def download_image_as_base64(self, image_url):
         """Download image from URL and return as Base64."""
-        response = requests.get(image_url)
-        if response.status_code == 200:
+        try:
+            response = requests.get(image_url)
+            response.raise_for_status()
             return base64.b64encode(response.content).decode('utf-8')
-        else:
-            return Exception(f"Failed to download_image_as_base64 from {image_url}")
+        except:
+            try:
+                print(f"Failed requests. Change to screenshot from {image_url}")
+                self.sb.driver.get(image_url)
+                image_element = self.sb.driver.find_element(By.TAG_NAME, 'img')
+                self.sb.driver.execute_script("arguments[0].scrollIntoView();", image_element)
+                image_base64 = image_element.screenshot_as_base64
+                self.sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
+                return image_base64
+            except:
+                print(f"Failed to capture image screenshot")
+                return None
 
     def drag_and_drop_file(self, file_input_selector, base64_image):
         """Simulate drag and drop of a Base64 image directly."""
@@ -72,7 +84,7 @@ class ImageTranslator:
                 print("Failed to fetch the image data from the blob URL.")
                 return None
         except Exception as e:
-            print(f"Error downloading the blob image: {e}")
+            print(f"Error downloading the blob image")
             return None
 
     def translate_image(self, image_url, original_page_url, index):
@@ -104,8 +116,8 @@ class ImageTranslator:
                 self.url_file_map[original_page_url][image_url] = f"data:image/jpeg;base64,{base64_translated_image}"
 
         except Exception as e:
-            print(f"Error translate_image {image_url}: {e}")
-            return
+            print(f"Error translate_image {image_url}")
+            return None
 
     def replace_images_in_original_page(self, original_page_url, selector):
         """Replace all original image URLs in the original page by finding elements via class."""
@@ -205,8 +217,8 @@ class ImageTranslator:
                 print(f"Replaced image {original_url} with translated image (Base64)")
 
         except Exception as e:
-            print(f"Error replace_images_in_original_page: {e}")
-            return
+            print(f"Error replace_images_in_original_page")
+            return None
 
     def clear_image(self):
         """Click the 'Clear Image' button using updated button structure."""
@@ -216,7 +228,7 @@ class ImageTranslator:
             self.sb.click(clear_button_selector)
             print("Cleared the image.")
         except Exception as e:
-            print(f"Error clear_image: {e}")
+            print(f"Error clear_image")
             return
 
     def process_images(self, image_urls, original_page_url, selector):
@@ -244,7 +256,7 @@ class ImageTranslator:
             self.replace_images_in_original_page(original_page_url, selector)
 
         except Exception as e:
-            print(f"Error process_images: {e}")
+            print(f"Error process_images")
 
     def monitor_url_change_and_translate(self, original_url, selector):
         """Monitor URL changes and trigger translation process when necessary."""
@@ -252,6 +264,7 @@ class ImageTranslator:
         while True:
             current_url = self.sb.get_current_url()
             if current_url != last_url:
+                print(f"\n--------------------------------------------------------------------------------------")
                 print(f"URL changed to {current_url}. Checking for images...")
 
                 try:
@@ -267,28 +280,25 @@ class ImageTranslator:
                     else:
                         print("No images found on this page Or Invalid selector.")
                 except Exception as e:
-                    print(f"Error monitor_url_change_and_translate: {e}")
+                    print(f"Error monitor_url_change_and_translate")
 
                 last_url = current_url
 
 
 with SB(uc=True, test=False, rtf=True, headless=False) as sb:
-    try:
-        sb.open(page_url)
 
-        images = sb.find_elements(selector)
-        image_urls = [img.get_attribute("src") for img in images if img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))]
+    sb.uc_open(page_url)
 
-        if not image_urls or not images:
-            print("No images found on this page Or Invalid selector.")
-        else:
-            print(f"Found {len(image_urls)} images. Processing...")
+    images = sb.find_elements(selector)
+    image_urls = [img.get_attribute("src") for img in images if img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))]
 
-            translator = ImageTranslator(sb, lang, download_image)
+    translator = ImageTranslator(sb, lang, download_image)
 
-            translator.process_images(image_urls, page_url, selector)
-            translator.monitor_url_change_and_translate(page_url, selector)
+    if not image_urls or not images:
+        print("No images found on this page Or Invalid selector.")
+        translator.monitor_url_change_and_translate(page_url, selector)
 
-    except Exception as e:
-        print(f"Error run_translation: {e}")
-        
+    else:
+        print(f"Found {len(image_urls)} images. Processing...")
+        translator.process_images(image_urls, page_url, selector)
+        translator.monitor_url_change_and_translate(page_url, selector)
