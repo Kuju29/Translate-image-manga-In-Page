@@ -13,27 +13,13 @@ class ImageTranslator:
         self.download_image = download_image
         self.url_file_map = {}
 
-    def download_image_as_base64(self, image_url, retries=3, delay=10):
-        """
-        Download image from URL and return as Base64. 
-        Retries the download up to `retries` times with `delay` seconds between attempts.
-        """
-        for attempt in range(retries):
-            try:
-                response = requests.get(image_url)
-                if response.status_code == 200:
-                    return base64.b64encode(response.content).decode('utf-8')
-                else:
-                    logging.error(f"Attempt {attempt + 1} failed: {response.status_code} for {image_url}")
-            except Exception as e:
-                logging.error(f"Attempt {attempt + 1} failed with exception: {e}")
-            
-            if attempt < retries - 1:
-                logging.info(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-        
-        logging.error(f"Failed to download_image_as_base64 from {image_url} after {retries} attempts.")
-        return None
+    def download_image_as_base64(self, image_url):
+        """Download image from URL and return as Base64."""
+        response = requests.get(image_url)
+        if response.status_code == 200:
+            return base64.b64encode(response.content).decode('utf-8')
+        else:
+            return Exception(f"Failed to download_image_as_base64 from {image_url}")
 
     def drag_and_drop_file(self, file_input_selector, base64_image):
         """Simulate drag and drop of a Base64 image directly."""
@@ -127,19 +113,95 @@ class ImageTranslator:
             self.sb.open(original_page_url)
 
             translated_images = self.url_file_map.get(original_page_url, {})
+            urls_to_replace = set(translated_images.keys())
+            remaining_images = set()
 
-            for original_url, base64_image_data in translated_images.items():
-                script = f"""
-                    var imgElements = document.querySelectorAll('{selector}');
-                    for (var img of imgElements) {{
-                        var imgSrc = img.src.split('?')[0];
-                        if (imgSrc === '{original_url}') {{
-                            img.src = '{base64_image_data}';
-                            console.log("Replaced image with translated image: {base64_image_data}");
-                        }}
-                    }}
-                """
-                self.sb.execute_script(script)
+            script_setup_observers = """
+                const urlsToReplace = new Set([...arguments[0]]);
+                const canvasDataUrlMap = arguments[1];
+                const remainingImages = new Set();
+
+                const batchReplaceImages = (images) => {
+                    images.forEach((img) => {
+                        const imgSrc = img.src.split('?')[0];
+                        if (!img.classList.contains('processed') && urlsToReplace.has(imgSrc)) {
+                            console.log(`Replacing image: ${imgSrc}`);
+                            img.src = canvasDataUrlMap[imgSrc];
+                            img.classList.add('processed');
+                            img.classList.remove('lazyload', 'lazyloaded');
+                            img.loading = 'eager';
+
+                            const newImg = new Image();
+                            newImg.src = canvasDataUrlMap[imgSrc];
+                            newImg.onload = () => {
+                                img.src = newImg.src;
+                                console.log(`Image loaded and replaced with new URL: ${canvasDataUrlMap[imgSrc]}`);
+                            };
+
+                            urlsToReplace.delete(imgSrc);
+                            remainingImages.delete(img);
+                        }
+                    });
+                };
+
+                const processAvailableImages = () => {
+                    const images = [...remainingImages];
+                    batchReplaceImages(images);
+                    updateRemainingImages();
+                };
+
+                const debounce = (func, delay) => {
+                    let timer;
+                    return (...args) => {
+                        clearTimeout(timer);
+                        timer = setTimeout(() => func(...args), delay);
+                    };
+                };
+
+                const updateRemainingImages = () => {
+                    document.querySelectorAll('img').forEach((img) => {
+                        if (!img.classList.contains('processed') && !img.src) {
+                            remainingImages.add(img);
+                        } else {
+                            remainingImages.delete(img);
+                        }
+                    });
+                };
+
+                const intersectionObserver = new IntersectionObserver((entries) => {
+                    entries.forEach((entry) => {
+                        if (entry.isIntersecting) {
+                            remainingImages.add(entry.target);
+                            debouncedProcess();
+                        }
+                    });
+                });
+
+                const mutationObserver = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
+                            debouncedProcess();
+                        }
+                    });
+                });
+
+                const debouncedProcess = debounce(processAvailableImages, 100);
+
+                const startObserving = () => {
+                    const images = document.querySelectorAll('img');
+                    images.forEach((img) => {
+                        intersectionObserver.observe(img);
+                        mutationObserver.observe(img, { attributes: true, attributeFilter: ['src'] });
+                    });
+
+                    processAvailableImages();
+                };
+
+                startObserving();
+            """
+
+            self.sb.execute_script(script_setup_observers, list(urls_to_replace), translated_images)
+            for original_url in urls_to_replace:
                 print(f"Replaced image {original_url} with translated image (Base64)")
 
         except Exception as e:
@@ -172,6 +234,7 @@ class ImageTranslator:
                 return
 
             print(f"Found {len(untranslated_images)} untranslated images. Starting translation.")
+            self.sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
             for index, image_url in enumerate(untranslated_images):
                 print(f"Processing image: {image_url}")
                 self.translate_image(image_url, original_page_url, index)
@@ -182,7 +245,6 @@ class ImageTranslator:
 
         except Exception as e:
             print(f"Error process_images: {e}")
-            return
 
     def monitor_url_change_and_translate(self, original_url, selector):
         """Monitor URL changes and trigger translation process when necessary."""
@@ -201,19 +263,16 @@ class ImageTranslator:
                             self.replace_images_in_original_page(current_url, selector)
                         else:
                             print(f"Found {len(images)} images. Starting translation...")
-                            self.sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
                             self.process_images(image_urls, current_url, selector)
                     else:
                         print("No images found on this page Or Invalid selector.")
                 except Exception as e:
                     print(f"Error monitor_url_change_and_translate: {e}")
-                    return
 
                 last_url = current_url
 
 
-
-with SB(uc=True, test=False, rtf=True, headless=False, xvfb=True) as sb:
+with SB(uc=True, test=False, rtf=True, headless=False) as sb:
     try:
         sb.open(page_url)
 
@@ -227,7 +286,6 @@ with SB(uc=True, test=False, rtf=True, headless=False, xvfb=True) as sb:
 
             translator = ImageTranslator(sb, lang, download_image)
 
-            sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={lang}&op=images')
             translator.process_images(image_urls, page_url, selector)
             translator.monitor_url_change_and_translate(page_url, selector)
 
