@@ -40,7 +40,7 @@ This Chrome extension finds the URLs of images on a page using a specified class
 
 
 #### If you want the extension to not disappear when the folder is deleted or moved:
-1. Go to `Translate-image-manga-In-Page folder`
+1. Go to `Translate-image-manga-In-Page` folder
 2. Compress all the files inside, including any subfolders, into a .zip file.
 3. Drag the .zip file into `chrome://extensions/`
 4. Done.
@@ -93,7 +93,7 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 
 ### [Ghost Manga](https://github.com/Kuju29/Translate-image-manga-In-Page/blob/main/ghostmanga.py)
 
-Ghost Manga UI v1.2.1: [https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga](https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga)
+Ghost Manga UI v1.2.2: [https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga](https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga)
 
 ![image](https://github.com/user-attachments/assets/23560443-4057-4442-a7cd-088ed53487b3)
 
