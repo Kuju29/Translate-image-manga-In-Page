@@ -6,7 +6,7 @@ const APIMerge = "TEXT_DETECTION";
 const TextMerge = 50;
 const Verticalboxlength = 50;
 const maxYLength = 300;
-const blockss = false;
+const blockss = true;
 const drawText = false;
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -266,7 +266,7 @@ class APINormalMode {
         }
 
         logProcess(`Processing image: ${imageUrl}`);
-        
+
         if (!textAnnotations || textAnnotations.length === 0) {
           logError("No text detected in the image.");
           return;
@@ -792,6 +792,7 @@ class APIMergeMode {
     let usedGroups = [];
     let drawnBoundingBoxes = [];
     let taggedBoxes = new Set();
+    let wordIndex = 0;
 
     fullTextAnnotation.pages.forEach((page) => {
       page.blocks.forEach((block) => {
@@ -814,6 +815,7 @@ class APIMergeMode {
                 height: vertices[2].y - vertices[0].y,
                 text: text,
                 tagged: false,
+                index: wordIndex++,
               };
             })
             .filter((word) => word !== null);
@@ -861,6 +863,10 @@ class APIMergeMode {
         let leftX = box.x0;
         let rightX = box.x1;
 
+        let groupBoxes = [box];
+        let groupText = box.text;
+        taggedBoxes.add(box.index);
+
         allWords.forEach((innerBox) => {
           if (
             !taggedBoxes.has(innerBox.index) &&
@@ -878,6 +884,8 @@ class APIMergeMode {
               rightX = Math.max(rightX, innerBox.x1);
 
               taggedBoxes.add(innerBox.index);
+              groupBoxes.push(innerBox);
+              groupText += " " + innerBox.text;
             }
           }
         });
@@ -890,18 +898,6 @@ class APIMergeMode {
             rightX > existingBox.leftX
           );
         });
-
-        if (isOverlapping) {
-          console.log("พบการทับซ้อนกับกล่องอื่น: ยกเลิกการสร้างกล่องใหม่");
-          drawnBoundingBoxes.push({
-            leftX: box.x0,
-            topY: box.y0,
-            rightX: box.x1,
-            bottomY: box.y1,
-            textInside: box.text,
-          });
-          return;
-        }
 
         if (bottomY - topY <= maxYLength) {
           if (blockss) {
@@ -925,10 +921,7 @@ class APIMergeMode {
             topY,
             rightX,
             bottomY,
-            textInside: this.checkTextInsideBoundingBox(
-              { x0: leftX, y0: topY, x1: rightX, y1: bottomY },
-              allWords
-            ),
+            textInside: groupText.trim(),
             tagged: true,
           });
 
@@ -949,41 +942,40 @@ class APIMergeMode {
             `ข้ามการสร้างกล่องที่มีเส้นแกน y ยาวเกินไป (${bottomY - topY} px)`
           );
 
-          allWords.forEach((innerBox, innerIndex) => {
-            if (
-              !taggedBoxes.has(innerIndex) &&
-              centerX >= innerBox.x0 &&
-              centerX <= innerBox.x1 &&
-              innerBox.y0 >= topY &&
-              innerBox.y1 <= bottomY
-            ) {
-              drawnBoundingBoxes.push({
-                leftX: innerBox.x0,
-                topY: innerBox.y0,
-                rightX: innerBox.x1,
-                bottomY: innerBox.y1,
-                textInside: innerBox.text,
-                tagged: true,
-              });
+          groupBoxes.forEach((innerBox) => {
+            drawnBoundingBoxes.push({
+              leftX: innerBox.x0,
+              topY: innerBox.y0,
+              rightX: innerBox.x1,
+              bottomY: innerBox.y1,
+              textInside: innerBox.text,
+              tagged: true,
+            });
 
-              taggedBoxes.add(innerIndex);
-            }
+            taggedBoxes.add(innerBox.index);
           });
         }
       }
     });
 
-    allWords.forEach((box) => {
-      if (!taggedBoxes.has(box.index)) {
-        console.log(
-          `กล่องข้อความที่ไม่ได้ใช้: (${box.x0}, ${box.y0}) to (${box.x1}, ${box.y1})`
+    allWords.forEach((wordBox) => {
+      const isContained = drawnBoundingBoxes.some((bbox) => {
+        const tolerance = 2;
+        return (
+          wordBox.x0 >= bbox.leftX - tolerance &&
+          wordBox.x1 <= bbox.rightX + tolerance &&
+          wordBox.y0 >= bbox.topY - tolerance &&
+          wordBox.y1 <= bbox.bottomY + tolerance
         );
+      });
+
+      if (!isContained) {
         drawnBoundingBoxes.push({
-          leftX: box.x0,
-          topY: box.y0,
-          rightX: box.x1,
-          bottomY: box.y1,
-          textInside: box.text,
+          leftX: wordBox.x0,
+          topY: wordBox.y0,
+          rightX: wordBox.x1,
+          bottomY: wordBox.y1,
+          textInside: wordBox.text,
         });
       }
     });
@@ -991,24 +983,27 @@ class APIMergeMode {
     return drawnBoundingBoxes;
   }
 
-  checkTextInsideBoundingBox(mergedBox, allWords) {
-    let textInsideBox = [];
-
-    allWords.forEach((word) => {
-      const { x0, y0, x1, y1, text } = word;
-
-      const isInside =
-        x0 >= mergedBox.x0 &&
-        x1 <= mergedBox.x1 &&
-        y0 >= mergedBox.y0 &&
-        y1 <= mergedBox.y1;
-
-      if (isInside) {
-        textInsideBox.push(text);
-      }
+  getWordsInsideBoundingBox(boundingBox, words) {
+    const { x0, y0, x1, y1 } = boundingBox;
+    const tolerance = 2;
+    const wordsInside = words.filter((word) => {
+      return (
+        word.x0 >= x0 - tolerance &&
+        word.x1 <= x1 + tolerance &&
+        word.y0 >= y0 - tolerance &&
+        word.y1 <= y1 + tolerance
+      );
     });
 
-    return textInsideBox.join(" ");
+    wordsInside.sort((a, b) => {
+      if (a.y0 === b.y0) {
+        return a.x0 - b.x0;
+      }
+      return a.y0 - b.y0;
+    });
+
+    const text = wordsInside.map((word) => word.text).join(" ");
+    return text;
   }
 
   async getImageUrls() {
