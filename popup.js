@@ -6,7 +6,7 @@ const APIMerge = "TEXT_DETECTION";
 const TextMerge = 50;
 const Verticalboxlength = 50;
 const maxYLength = 300;
-const blockss = true;
+const blockss = false;
 const drawText = false;
 
 document.addEventListener("DOMContentLoaded", () => {
