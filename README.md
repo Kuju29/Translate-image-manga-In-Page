@@ -82,6 +82,11 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 | `[class="gallery"] div[class="gallery-item"]`| `.gallery div.gallery-item`            |
 
 ---
+- There are still problems with dynamic word merging.
+
+![image](https://github.com/user-attachments/assets/ae7a6c83-fbd0-4008-97db-c7e7aa551b64)
+
+---
 
 ## Screenshots
 
