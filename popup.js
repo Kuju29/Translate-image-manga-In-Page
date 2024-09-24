@@ -1199,26 +1199,26 @@ class APIMergeMode {
     const { x0, x1, y0, y1 } = block.bbox;
     const width = x1 - x0;
     const height = y1 - y0;
-
+  
     let fontSize = Math.min(height * 0.8, 40);
-
+  
     const minFontSize = 16;
     const maxFontSize = 40;
-
+  
     if (fontSize < minFontSize) {
       fontSize = minFontSize;
     }
-
+  
     ctx.font = `${fontSize}px Arial`;
-
+  
     let lineHeight = fontSize * 1.2;
     let lines = [];
     let totalTextHeight = 0;
-
+  
     while (true) {
       lines = this.wrapText(ctx, translatedText, width);
       totalTextHeight = lines.length * lineHeight;
-
+  
       if (totalTextHeight <= height || fontSize <= minFontSize) {
         break;
       } else {
@@ -1227,18 +1227,18 @@ class APIMergeMode {
         lineHeight = fontSize * 1.2;
       }
     }
-
+  
     if (fontSize <= minFontSize) {
       console.log("ขนาดฟอนต์ต่ำกว่าค่าที่กำหนด วาดข้อความทับขอบเขตของกล่อง");
       fontSize = minFontSize;
       ctx.font = `${fontSize}px Arial`;
       lineHeight = fontSize * 1.2;
     }
-
+  
     ctx.fillStyle = "black";
-
+  
     let startY = y0 + (height - totalTextHeight) / 2 + lineHeight * 0.8;
-
+  
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const lineMetrics = ctx.measureText(line);
@@ -1247,34 +1247,47 @@ class APIMergeMode {
       startY += lineHeight;
     }
   }
-
+  
   splitTextUsingIntl(text) {
     const segmenter = new Intl.Segmenter(this.targetLang, {
       granularity: "word",
     });
     const segments = segmenter.segment(text);
-
+  
     const words = [];
+    let tempWord = "";
+  
     for (const { segment, isWordLike } of segments) {
-      if (isWordLike || /[.,!?;:]/.test(segment)) {
-        words.push(segment.trim());
+      if (isWordLike) {
+        tempWord += segment.trim();
+      } else if (/[.,!?;:]/.test(segment)) {
+        tempWord += segment;
       } else {
-        words.push(segment);
+        if (tempWord) {
+          words.push(tempWord);
+          tempWord = "";
+        }
+        words.push(segment.trim());
       }
     }
+  
+    if (tempWord) {
+      words.push(tempWord);
+    }
+  
     return words;
   }
-
+  
   wrapText(ctx, text, maxWidth) {
     const words = this.splitTextUsingIntl(text);
     const lines = [];
     let line = "";
-
+  
     for (let i = 0; i < words.length; i++) {
       const testLine = line + words[i];
       const metrics = ctx.measureText(testLine);
       const testWidth = metrics.width;
-
+  
       if (testWidth > maxWidth && line !== "") {
         lines.push(line.trim());
         line = words[i];
@@ -1282,36 +1295,43 @@ class APIMergeMode {
         line = testLine;
       }
     }
-
+  
     if (line !== "") {
       lines.push(line.trim());
     }
-
+  
     return lines;
-  }
+  }  
 }
 
 async function translateText(text, targetLang) {
   try {
     logProcess(`Translating text: ${text}`);
-
     const encodedText = encodeURIComponent(text);
-
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodedText}`;
 
     const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const result = await response.json();
 
-    if (result && result[0] && result[0][0] && result[0][0][0]) {
+    console.log("Translation API response:", result);
+
+    if (Array.isArray(result) && result[0] && Array.isArray(result[0]) && result[0][0] && typeof result[0][0][0] === 'string') {
       return result[0][0][0];
     } else {
-      throw new Error("Translation failed");
+      console.error("Unexpected response format detected:", JSON.stringify(result));
+      throw new Error("Translation failed due to unexpected response format.");
     }
   } catch (error) {
-    logError("Failed to translate text.");
-    throw new Error("Failed to translate text.");
+    logError(`Failed to translate text: ${error.message}`);
+    throw new Error(`Failed to translate text: ${error.message}`);
   }
 }
+
 
 async function processImageWithVisionAPI(imageUrl, apiKey, features) {
   try {
