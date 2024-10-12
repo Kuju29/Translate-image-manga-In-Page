@@ -269,7 +269,11 @@ class ImageTranslator:
 
                 try:
                     images = self.sb.find_elements(selector)
-                    image_urls = [img.get_attribute("src") for img in images if img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))]
+                    image_urls = [
+                        img.get_attribute("src")
+                        for img in images
+                        if img.get_attribute("src") and img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))
+                    ]
                     if image_urls: 
                         if current_url in self.url_file_map:
                             print("Have backup.. Returning to original page to replace images.")
@@ -290,7 +294,11 @@ with SB(uc=True, test=False, rtf=True, headless=False) as sb:
     sb.uc_open(page_url)
 
     images = sb.find_elements(selector)
-    image_urls = [img.get_attribute("src") for img in images if img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))]
+    image_urls = [
+        img.get_attribute("src")
+        for img in images
+        if img.get_attribute("src") and img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))
+    ]
 
     translator = ImageTranslator(sb, lang, download_image)
 
