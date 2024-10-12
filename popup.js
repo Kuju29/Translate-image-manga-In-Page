@@ -1249,8 +1249,10 @@ class APIMergeMode {
   }
   
   splitTextUsingIntl(text) {
+    const granularity = this.targetLang === "th" ? "grapheme" : "word";
+  
     const segmenter = new Intl.Segmenter(this.targetLang, {
-      granularity: "word",
+      granularity: granularity,
     });
     const segments = segmenter.segment(text);
   
@@ -1258,16 +1260,20 @@ class APIMergeMode {
     let tempWord = "";
   
     for (const { segment, isWordLike } of segments) {
-      if (isWordLike) {
-        tempWord += segment.trim();
-      } else if (/[.,!?;:]/.test(segment)) {
-        tempWord += segment;
+      if (this.targetLang === "th") {
+        words.push(segment);
       } else {
-        if (tempWord) {
-          words.push(tempWord);
-          tempWord = "";
+        if (isWordLike) {
+          tempWord += segment.trim();
+        } else if (/[.,!?;:]/.test(segment)) {
+          tempWord += segment;
+        } else {
+          if (tempWord) {
+            words.push(tempWord);
+            tempWord = "";
+          }
+          words.push(segment.trim());
         }
-        words.push(segment.trim());
       }
     }
   
