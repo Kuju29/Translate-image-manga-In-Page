@@ -1,60 +1,203 @@
+import threading, queue, shelve, requests, base64, os, logging, time, shutil
 from selenium.webdriver.common.by import By
-from seleniumbase import Driver, SB
-import requests, base64, os
+from collections import defaultdict
+from datetime import datetime
+from seleniumbase import SB
 
-page_url = 'https://manhwabtt.cc/manga/dame-skill-auto-mode-ga-kakuseishimashita-are-guild-no-scout-san-ore-wo-iranai-tte-itte-masendeshita/chapter-57-eng-li/757961'
-selector = '[class="reading-detail box_doc"] img'
-lang = 'th'
-download_image = False
 
-class ImageTranslator:
-    def __init__(self, sb_instance, lang, download_image=False):
-        self.sb = sb_instance
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+translation_tasks = queue.Queue()
+translation_results = queue.Queue()
+
+
+downloaded_files_dir = 'downloaded_files'
+backups_dir = os.path.join(downloaded_files_dir, 'backups')
+shelve_filename = 'translated_images.db'
+shelve_path = os.path.join(downloaded_files_dir, shelve_filename)
+
+
+os.makedirs(backups_dir, exist_ok=True)
+os.makedirs(downloaded_files_dir, exist_ok=True)
+
+
+lock = threading.Lock()
+
+
+def load_url_file_map():
+    """Load the url_file_map from the shelve database."""
+    if not os.path.exists(shelve_path + '.db'):
+
+        with shelve.open(shelve_path) as db:
+            db['url_file_map'] = {}
+    with shelve.open(shelve_path) as db:
+        return defaultdict(set, db.get('url_file_map', {}))
+
+
+def save_url_file_map(url_file_map):
+    """Save the url_file_map to the shelve database."""
+    with shelve.open(shelve_path) as db:
+        db['url_file_map'] = {key: list(value)
+                              for key, value in url_file_map.items()}
+
+
+def backup_shelve_db():
+    """Create a backup copy of the shelve database."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_filename = f'translated_images_backup_{timestamp}.db'
+    backup_path = os.path.join(backups_dir, backup_filename)
+    try:
+
+        base, ext = os.path.splitext(shelve_path)
+        for file in os.listdir(downloaded_files_dir):
+            if file.startswith(os.path.basename(base)):
+                shutil.copy(os.path.join(
+                    downloaded_files_dir, file), backup_path)
+        logging.info(f"Backup created at {backup_path}")
+    except Exception as e:
+        logging.error(f"Failed to create backup: {e}")
+
+
+url_file_map = load_url_file_map()
+
+
+class TranslatorThread(threading.Thread):
+    """Background thread for translating images."""
+
+    def __init__(self, lang='en', download_image=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.lang = lang
         self.download_image = download_image
-        self.url_file_map = {}
+        self.daemon = True
+        self.stop_event = threading.Event()
 
-    def download_image_as_base64(self, image_url):
-        """Download image from URL and return as Base64."""
+    def run(self):
+        try:
+            with SB(uc=True, test=False, rtf=True, headless=True) as sb:
+
+                sb.uc_open(
+                    f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
+                logging.info(
+                    "Background Translator: Opened Google Translate Images page")
+
+                while not self.stop_event.is_set():
+                    try:
+
+                        task = translation_tasks.get(timeout=1)
+                        image_url = task['image_url']
+                        original_page_url = task['original_page_url']
+                        image_index = task['image_index']
+                        logging.info(f"Background Translator: Translating image {
+                                     image_index} - {image_url}")
+
+                        base64_image = self.download_image_as_base64(
+                            sb, image_url)
+                        if base64_image:
+
+                            self.drag_and_drop_file(
+                                sb, 'input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]', base64_image)
+                            sb.sleep(2)
+
+                            try:
+                                translated_image = sb.wait_for_element_visible(
+                                    '.CMhTbb.tyW0pd img', timeout=15)
+                                translated_image_blob_url = translated_image.get_attribute(
+                                    "src")
+                                logging.info(f"Background Translator: Retrieved translated Blob URL: {
+                                             translated_image_blob_url}")
+                            except Exception as e:
+                                logging.error(
+                                    f"Background Translator: Translated image not found: {e}")
+                                self.clear_image(sb)
+                                continue
+
+                            base64_translated_image = self.download_blob_image(
+                                sb, translated_image_blob_url, image_index)
+                            if base64_translated_image:
+
+                                result = {
+                                    'original_page_url': original_page_url,
+                                    'original_image_url': image_url,
+                                    'translated_image_data': f"data:image/jpeg;base64,{base64_translated_image}"
+                                }
+                                translation_results.put(result)
+                                logging.info(
+                                    f"Background Translator: Completed translation for image {image_url}")
+
+                                with lock:
+                                    url_file_map[original_page_url].add(
+                                        image_url)
+                                    save_url_file_map(url_file_map)
+                                    backup_shelve_db()
+
+                            self.clear_image(sb)
+                        else:
+                            logging.error(
+                                f"Background Translator: Failed to download image {image_url}")
+                    except queue.Empty:
+                        continue
+                    except Exception as e:
+                        logging.error(
+                            f"Background Translator: Error processing task: {e}")
+        except Exception as e:
+            logging.error(f"Background Translator: Unexpected error: {e}")
+
+    def download_image_as_base64(self, sb, image_url):
+        """Download image from URL and convert to Base64."""
         try:
             response = requests.get(image_url)
             response.raise_for_status()
             return base64.b64encode(response.content).decode('utf-8')
-        except:
+        except Exception as e:
+            logging.info(f"Background Translator: Failed to download image from {
+                         image_url}: {e}")
             try:
-                print(f"Failed requests. Change to screenshot from {image_url}")
-                self.sb.driver.get(image_url)
-                image_element = self.sb.driver.find_element(By.TAG_NAME, 'img')
-                self.sb.driver.execute_script("arguments[0].scrollIntoView();", image_element)
+                logging.info(
+                    f"Background Translator: Attempting to capture screenshot from {image_url}")
+                sb.driver.get(image_url)
+                image_element = sb.driver.find_element(By.TAG_NAME, 'img')
+                sb.driver.execute_script(
+                    "arguments[0].scrollIntoView();", image_element)
                 image_base64 = image_element.screenshot_as_base64
-                self.sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
+                sb.uc_open_with_reconnect(
+                    f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
                 return image_base64
-            except:
-                print(f"Failed to capture image screenshot")
+            except Exception as e:
+                logging.error(f"Background Translator: Failed to capture screenshot from {
+                              image_url}: {e}")
                 return None
 
-    def drag_and_drop_file(self, file_input_selector, base64_image):
-        """Simulate drag and drop of a Base64 image directly."""
-        self.sb.execute_script("""
-        var fileInput = document.querySelector(arguments[0]);
-        var base64Image = arguments[1];
-        var byteCharacters = atob(base64Image);
-        var byteNumbers = new Array(byteCharacters.length);
-        for (var i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        var byteArray = new Uint8Array(byteNumbers);
-        var file = new File([byteArray], 'file.jpg', { type: 'image/jpeg' }); 
-        var dataTransfer = new DataTransfer();
-        dataTransfer.items.add(file);
-        fileInput.files = dataTransfer.files;
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        """, file_input_selector, base64_image) # จำลองการลาก
-
-    def download_blob_image(self, blob_url, index):
-        """Fetch the translated image as Base64 from the blob URL."""
+    def drag_and_drop_file(self, sb, file_input_selector, base64_image):
+        """Simulate drag and drop of a Base64 image."""
         try:
-            image_data = self.sb.execute_script("""
+            sb.execute_script("""
+                var fileInput = document.querySelector(arguments[0]);
+                var base64Image = arguments[1];
+                var byteCharacters = atob(base64Image);
+                var byteNumbers = new Array(byteCharacters.length);
+                for (var i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                var byteArray = new Uint8Array(byteNumbers);
+                var file = new File([byteArray], 'file.jpg', { type: 'image/jpeg' }); 
+                var dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                fileInput.files = dataTransfer.files;
+                fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+            """, file_input_selector, base64_image)
+            logging.info(
+                "Background Translator: Simulated drag and drop of the image")
+        except Exception as e:
+            logging.error(
+                f"Background Translator: Error during drag and drop: {e}")
+
+    def download_blob_image(self, sb, blob_url, index):
+        """Download translated image from Blob URL and convert to Base64."""
+        try:
+            image_data = sb.execute_script("""
                 return fetch(arguments[0])
                     .then(response => response.blob())
                     .then(blob => {
@@ -71,242 +214,150 @@ class ImageTranslator:
                 base64_image = image_data.split(',')[1]
                 if self.download_image:
                     folder_path = 'downloaded_files'
-                    if not os.path.exists(folder_path):
-                        os.makedirs(folder_path)
+                    os.makedirs(folder_path, exist_ok=True)
                     file_path = os.path.join(folder_path, f'image_{index}.jpg')
-                    image_data = image_data.split(',')[1]
                     with open(file_path, 'wb') as f:
-                        f.write(base64.b64decode(image_data))
-                    print(f"Downloaded translated image to {file_path}")
-                        
+                        f.write(base64.b64decode(base64_image))
+                    logging.info(
+                        f"Background Translator: Downloaded translated image to {file_path}")
                 return base64_image
             else:
-                print("Failed to fetch the image data from the blob URL.")
+                logging.info(
+                    "Background Translator: Failed to fetch image data from Blob URL")
                 return None
         except Exception as e:
-            print(f"Error downloading the blob image")
+            logging.error(f"Background Translator: Error downloading Blob image from {
+                          blob_url}: {e}")
             return None
 
-    def translate_image(self, image_url, original_page_url, index):
-        """Process a single image for translation, unless already translated."""
+    def clear_image(self, sb):
+        """Click the 'Clear Image' button to reset the translator."""
         try:
-
-            if original_page_url not in self.url_file_map:
-                self.url_file_map[original_page_url] = {}
-
-            if image_url in self.url_file_map[original_page_url]:
-                print(
-                    f"Image {image_url} already translated. Skipping translation.")
-                return
-
-            base64_image = self.download_image_as_base64(image_url)
-
-            self.drag_and_drop_file('input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]', base64_image) # <input id="ucj-39" type="file" name="file" class="ZdLswd" accept="image/jpeg, image/png, .jpeg, .jpg, .png" jsname="qGt1Bf" jsaction="change:bK2emb; click:fUEfwd;"> 
-            self.sb.sleep(1)
-            
-            translated_image = self.sb.wait_for_element_visible(
-                '.CMhTbb.tyW0pd img', timeout=2) # <div class="CMhTbb tyW0pd"><img class="Jmlpdc" loading="lazy" src="blob:https://translate.google.com/a1af381d-235d-4521-aac4-dfe8cee3e964" alt="9
-            translated_image_blob_url = translated_image.get_attribute("src")
-            print(f"Translated Blob URL: {translated_image_blob_url}")
-
-            base64_translated_image = self.download_blob_image(
-                translated_image_blob_url, index)
-
-            if base64_translated_image:
-                self.url_file_map[original_page_url][image_url] = f"data:image/jpeg;base64,{base64_translated_image}"
-
+            clear_button_selector = 'button.VfPpkd-Bz112c-LgbsSe.yHy1rc.eT1oJ.mN1ivc.B0czFe'
+            sb.wait_for_element_visible(clear_button_selector, timeout=5)
+            sb.click(clear_button_selector)
+            logging.info(
+                "Background Translator: Cleared the image for next translation")
         except Exception as e:
-            print(f"Error translate_image {image_url}")
-            return None
+            logging.error(f"Background Translator: Error clearing image: {e}")
 
-    def replace_images_in_original_page(self, original_page_url, selector):
-        """Replace all original image URLs in the original page by finding elements via class."""
-        try:
-            self.sb.open(original_page_url)
 
-            translated_images = self.url_file_map.get(original_page_url, {})
-            urls_to_replace = set(translated_images.keys())
-            remaining_images = set()
+def run_translation(page_url, selector=None, lang='en', download_image=False, num_translators=4):
+    """
+    Main function to run the image translation process.
 
-            script_setup_observers = """
-                const urlsToReplace = new Set([...arguments[0]]);
-                const canvasDataUrlMap = arguments[1];
-                const remainingImages = new Set();
+    Args:
+        page_url (str): URL of the webpage to translate images on.
+        selector (str, optional): CSS selector to find images. Defaults to 'img' if None.
+        lang (str, optional): Target language code for translation. Defaults to 'en'.
+        download_image (bool, optional): Whether to download translated images. Defaults to False.
+        num_translators (int, optional): Number of background translator threads. Defaults to 4.
+    """
+    try:
 
-                const batchReplaceImages = (images) => {
-                    images.forEach((img) => {
-                        const imgSrc = img.src.split('?')[0];
-                        if (!img.classList.contains('processed') && urlsToReplace.has(imgSrc)) {
-                            console.log(`Replacing image: ${imgSrc}`);
-                            img.src = canvasDataUrlMap[imgSrc];
-                            img.classList.add('processed');
-                            img.classList.remove('lazyload', 'lazyloaded');
-                            img.loading = 'eager';
+        translator_threads = []
+        for i in range(num_translators):
+            translator = TranslatorThread(
+                lang=lang, download_image=download_image)
+            translator.start()
+            translator_threads.append(translator)
+            logging.info(f"Started Background Translator Thread {i+1}")
 
-                            const newImg = new Image();
-                            newImg.src = canvasDataUrlMap[imgSrc];
-                            newImg.onload = () => {
-                                img.src = newImg.src;
-                                console.log(`Image loaded and replaced with new URL: ${canvasDataUrlMap[imgSrc]}`);
-                            };
+        with SB(uc=True, test=False, rtf=True, headless=False) as sb_main:
+            sb_main.uc_open(page_url)
+            logging.info(f"Main Browser: Opened {page_url}")
 
-                            urlsToReplace.delete(imgSrc);
-                            remainingImages.delete(img);
-                        }
-                    });
-                };
+            if not selector:
+                selector = "img"
+                logging.info(
+                    "Main Browser: No selector provided, using default selector 'img' to find all images")
+            else:
+                logging.info(f"Main Browser: Using provided selector '{
+                             selector}' to find images")
 
-                const processAvailableImages = () => {
-                    const images = [...remainingImages];
-                    batchReplaceImages(images);
-                    updateRemainingImages();
-                };
+            def find_and_queue_images(current_page_url):
+                images = sb_main.find_elements(selector)
+                image_urls = [
+                    img.get_attribute("src")
+                    for img in images
+                    if img.get_attribute("src") and img.get_attribute("src").lower().endswith((".jpg", ".png", ".jpeg", ".webp"))
+                ]
+                logging.info(f"Main Browser: Found {
+                             len(image_urls)} images on the page")
 
-                const debounce = (func, delay) => {
-                    let timer;
-                    return (...args) => {
-                        clearTimeout(timer);
-                        timer = setTimeout(() => func(...args), delay);
-                    };
-                };
+                with lock:
+                    for index, image_url in enumerate(image_urls, start=1):
+                        if image_url not in url_file_map[current_page_url]:
+                            task = {
+                                'image_url': image_url,
+                                'original_page_url': current_page_url,
+                                'image_index': index
+                            }
+                            translation_tasks.put(task)
+                            logging.info(f"Main Browser: Queued image {
+                                         index}: {image_url} for translation")
+                            url_file_map[current_page_url].add(image_url)
+                            save_url_file_map(url_file_map)
+                            backup_shelve_db()
 
-                const updateRemainingImages = () => {
-                    document.querySelectorAll('img').forEach((img) => {
-                        if (!img.classList.contains('processed') && !img.src) {
-                            remainingImages.add(img);
-                        } else {
-                            remainingImages.delete(img);
-                        }
-                    });
-                };
+            current_page_url = sb_main.get_current_url()
+            find_and_queue_images(current_page_url)
 
-                const intersectionObserver = new IntersectionObserver((entries) => {
-                    entries.forEach((entry) => {
-                        if (entry.isIntersecting) {
-                            remainingImages.add(entry.target);
-                            debouncedProcess();
-                        }
-                    });
-                });
+            last_url = current_page_url
 
-                const mutationObserver = new MutationObserver((mutations) => {
-                    mutations.forEach((mutation) => {
-                        if (mutation.type === 'attributes' && mutation.attributeName === 'src') {
-                            debouncedProcess();
-                        }
-                    });
-                });
-
-                const debouncedProcess = debounce(processAvailableImages, 100);
-
-                const startObserving = () => {
-                    const images = document.querySelectorAll('img');
-                    images.forEach((img) => {
-                        intersectionObserver.observe(img);
-                        mutationObserver.observe(img, { attributes: true, attributeFilter: ['src'] });
-                    });
-
-                    processAvailableImages();
-                };
-
-                startObserving();
-            """
-
-            self.sb.execute_script(script_setup_observers, list(urls_to_replace), translated_images)
-            for original_url in urls_to_replace:
-                print(f"Replaced image {original_url} with translated image (Base64)")
-
-        except Exception as e:
-            print(f"Error replace_images_in_original_page")
-            return None
-
-    def clear_image(self):
-        """Click the 'Clear Image' button using updated button structure."""
-        try:
-            clear_button_selector = 'button.VfPpkd-Bz112c-LgbsSe.yHy1rc.eT1oJ.mN1ivc.B0czFe' # <button class="VfPpkd-Bz112c-LgbsSe yHy1rc eT1oJ mN1ivc B0czFe" jscontroller="soHxf" jsaction="click:cOuCgd; mousedown:UX7yZ; 
-            self.sb.wait_for_element_visible(clear_button_selector, timeout=2)
-            self.sb.click(clear_button_selector)
-            print("Cleared the image.")
-        except Exception as e:
-            print(f"Error clear_image")
-            return
-
-    def process_images(self, image_urls, original_page_url, selector):
-        """Process all images for translation, skipping already translated ones."""
-
-        try:
-            if original_page_url not in self.url_file_map:
-                self.url_file_map[original_page_url] = {}
-
-            untranslated_images = [img_url for img_url in image_urls if img_url not in self.url_file_map[original_page_url]]
-
-            if len(untranslated_images) == 1:
-                print("Found 1 untranslated image. Skipping translation.")
-                self.replace_images_in_original_page(original_page_url, selector)
-                return
-
-            print(f"Found {len(untranslated_images)} untranslated images. Starting translation.")
-            self.sb.uc_open_with_reconnect(f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
-            for index, image_url in enumerate(untranslated_images):
-                print(f"Processing image: {image_url}")
-                self.translate_image(image_url, original_page_url, index)
-                self.clear_image()
-                
-            print("Returning to original page to replace images.")
-            self.replace_images_in_original_page(original_page_url, selector)
-
-        except Exception as e:
-            print(f"Error process_images")
-
-    def monitor_url_change_and_translate(self, original_url, selector):
-        """Monitor URL changes and trigger translation process when necessary."""
-        last_url = original_url
-        while True:
-            current_url = self.sb.get_current_url()
-            if current_url != last_url:
-                print(f"\n--------------------------------------------------------------------------------------")
-                print(f"URL changed to {current_url}. Checking for images...")
+            while True:
+                current_url = sb_main.get_current_url()
+                if current_url != last_url:
+                    logging.info(
+                        "--------------------------------------------------------------------------------------")
+                    logging.info(f"Main Browser: URL changed to {
+                                 current_url}, searching for new images...")
+                    find_and_queue_images(current_url)
+                    last_url = current_url
 
                 try:
-                    images = self.sb.find_elements(selector)
-                    image_urls = [
-                        img.get_attribute("src")
-                        for img in images
-                        if img.get_attribute("src") and img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))
-                    ]
-                    if image_urls: 
-                        if current_url in self.url_file_map:
-                            print("Have backup.. Returning to original page to replace images.")
-                            self.replace_images_in_original_page(current_url, selector)
-                        else:
-                            print(f"Found {len(images)} images. Starting translation...")
-                            self.process_images(image_urls, current_url, selector)
-                    else:
-                        print("No images found on this page Or Invalid selector.")
-                except Exception as e:
-                    print(f"Error monitor_url_change_and_translate")
+                    while True:
+                        result = translation_results.get_nowait()
+                        original_image_url = result['original_image_url']
+                        translated_image_data = result['translated_image_data']
+                        original_page_url = result['original_page_url']
 
-                last_url = current_url
+                        images = sb_main.find_elements(selector)
+                        for img in images:
+                            src = img.get_attribute("src")
+                            if src == original_image_url:
+
+                                sb_main.execute_script(
+                                    "arguments[0].src = arguments[1];", img, translated_image_data)
+                                logging.info(f"Main Browser: Replaced image {
+                                             original_image_url} with translated image")
+                                break
+                except queue.Empty:
+                    pass
+
+                sb_main.sleep(2)
+    except KeyboardInterrupt:
+        logging.info("Program terminated by user")
+    except Exception as e:
+        logging.error(f"Error in run_translation: {e}")
+    finally:
+
+        with lock:
+            save_url_file_map(url_file_map)
+            backup_shelve_db()
+        logging.info("Saved translated images mapping to persistent storage")
+
+        for translator in translator_threads:
+            translator.stop_event.set()
+        logging.info(
+            "All Background Translator Threads have been signaled to stop")
 
 
-with SB(uc=True, test=False, rtf=True, headless=False) as sb:
+if __name__ == "__main__":
 
-    sb.uc_open(page_url)
+    PAGE_URL = "https://manhwabtt.cc/manga/dame-skill-auto-mode-ga-kakuseishimashita-are-guild-no-scout-san-ore-wo-iranai-tte-itte-masendeshita/chapter-57-eng-li/757961"
+    SELECTOR = ''
+    LANGUAGE = "th"
+    DOWNLOAD_IMAGE = False
 
-    images = sb.find_elements(selector)
-    image_urls = [
-        img.get_attribute("src")
-        for img in images
-        if img.get_attribute("src") and img.get_attribute("src").endswith((".jpg", ".png", ".jpeg", ".webp"))
-    ]
-
-    translator = ImageTranslator(sb, lang, download_image)
-
-    if not image_urls or not images:
-        print("No images found on this page Or Invalid selector.")
-        translator.monitor_url_change_and_translate(page_url, selector)
-
-    else:
-        print(f"Found {len(image_urls)} images. Processing...")
-        translator.process_images(image_urls, page_url, selector)
-        translator.monitor_url_change_and_translate(page_url, selector)
+    run_translation(PAGE_URL, SELECTOR, LANGUAGE, DOWNLOAD_IMAGE)
