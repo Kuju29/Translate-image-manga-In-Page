@@ -81,6 +81,10 @@ Below are common CSS selectors and their abbreviations, which the extension uses
 | `[class="form-group"] input[type="text"]`   | `.form-group input[type="text"]`       |
 | `[class="gallery"] div[class="gallery-item"]`| `.gallery div.gallery-item`            |
 
+If you want to search for all the images on the page, you can use the selector as just 'img', as shown in the image.
+![image](https://github.com/user-attachments/assets/71e4fe65-c222-4f41-adea-1fb7aaeca5f1)
+
+
 ---
 - There are still problems with dynamic word merging.
 
