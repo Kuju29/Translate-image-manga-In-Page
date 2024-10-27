@@ -102,7 +102,10 @@ If you want to search for all the images on the page, you can use the selector a
 
 ### [Ghost Manga](https://github.com/Kuju29/Translate-image-manga-In-Page/blob/main/ghostmanga.py)
 
-Ghost Manga UI v1.2.2: [https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga](https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga)
+Ghost Manga UI v2.2.0 (This version still has a problem with slow program closing. I will fix it later.): 
+[https://www.mediafire.com/file/ftjnwukhpb4h0qx/Ghost_Manga_UI_v2.2.0.exe/file](https://www.mediafire.com/file/ftjnwukhpb4h0qx/Ghost_Manga_UI_v2.2.0.exe/file)\
+Ghost Manga UI All version: 
+[https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga](https://www.mediafire.com/folder/s6ecg0np9f6gj/Ghost+manga)
 
 ![image](https://github.com/user-attachments/assets/23560443-4057-4442-a7cd-088ed53487b3)
 
