@@ -1,7 +1,6 @@
 import threading, queue, requests, base64, os, logging, time, shutil
 from selenium.webdriver.common.by import By
 from seleniumbase import SB
-from datetime import datetime
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,18 +17,18 @@ lock = threading.Lock()
 class TranslatorThread(threading.Thread):
     """Background thread for translating images."""
 
-    def __init__(self, lang='en', download_image=False, *args, **kwargs):
+    def __init__(self, lang='en', download_image=False, stop_event=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.lang = lang
         self.download_image = download_image
         self.daemon = True
-        self.stop_event = threading.Event()
+        self.stop_event = stop_event or threading.Event()
 
     def run(self):
         try:
             with SB(uc=True, test=False, rtf=True, headless=True) as sb_translate:
                 try:
-                    sb_translate.uc_open(
+                    sb_translate.open(
                         f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
                     logging.info(
                         "Background Translator: Opened Google Translate Images page")
@@ -165,19 +164,28 @@ class TranslatorThread(threading.Thread):
         except Exception as e:
             logging.error(f"Background Translator: Error clearing image: {e}")
 
-def run_translation(page_url, selector=None, lang='en', download_image=False, num_translators=4):
+def run_translation(page_url, selector=None, lang='en', download_image=False, stop_event=None, num_translators=4):
+    if stop_event is None:
+        stop_event = threading.Event()
+
     try:
         translator_threads = []
         for i in range(num_translators):
             translator = TranslatorThread(
-                lang=lang, download_image=download_image)
+                lang=lang, download_image=download_image, stop_event=stop_event)
             translator.start()
             translator_threads.append(translator)
             logging.info(f"Started Background Translator Thread {i+1}")
 
         with SB(uc=True, test=False, rtf=True, headless=False) as sb_main:
-            sb_main.uc_open(page_url)
+            sb_main.open(page_url)
             logging.info(f"Main Browser: Opened {page_url}")
+
+            try:
+                sb_main.wait_for_element_visible('img', timeout=15)
+                logging.info("Main Browser: Page has loaded images.")
+            except Exception as e:
+                logging.error(f"Main Browser: Timeout waiting for images to load: {e}")
 
             if not selector:
                 selector = "img"
@@ -188,6 +196,10 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, nu
 
             def find_and_queue_images(current_page_url):
                 images = sb_main.find_elements(selector)
+                if not images:
+                    logging.warning("Main Browser: No images found on the page.")
+                    return
+
                 image_urls = [
                     img.get_attribute("src")
                     for img in images
@@ -210,7 +222,7 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, nu
 
             last_url = current_page_url
 
-            while True:
+            while not stop_event.is_set():
                 current_url = sb_main.get_current_url()
                 if current_url != last_url:
                     logging.info(
@@ -230,7 +242,6 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, nu
                         for img in images:
                             src = img.get_attribute("src")
                             if src == original_image_url:
-
                                 sb_main.execute_script(
                                     "arguments[0].src = arguments[1];", img, translated_image_data)
                                 logging.info(f"Main Browser: Replaced image {original_image_url} with translated image")
@@ -238,8 +249,6 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, nu
                 except queue.Empty:
                     pass
                 sb_main.sleep(2)
-    except KeyboardInterrupt:
-        logging.info("Program terminated by user")
     except Exception as e:
         logging.error(f"Error in run_translation: {e}")
     finally:
@@ -249,7 +258,6 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, nu
         for translator in translator_threads:
             translator.join()
         logging.info("All Background Translator Threads have been stopped")
-
         logging.info("Program has terminated gracefully")
 
 if __name__ == "__main__":
