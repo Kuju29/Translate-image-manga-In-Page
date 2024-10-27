@@ -181,12 +181,6 @@ def run_translation(page_url, selector=None, lang='en', download_image=False, st
             sb_main.open(page_url)
             logging.info(f"Main Browser: Opened {page_url}")
 
-            try:
-                sb_main.wait_for_element_visible('img', timeout=15)
-                logging.info("Main Browser: Page has loaded images.")
-            except Exception as e:
-                logging.error(f"Main Browser: Timeout waiting for images to load: {e}")
-
             if not selector:
                 selector = "img"
                 logging.info(
