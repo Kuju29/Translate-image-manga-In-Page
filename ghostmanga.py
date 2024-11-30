@@ -12,13 +12,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 downloaded_files_dir = 'downloaded_files'
 os.makedirs(downloaded_files_dir, exist_ok=True)
 
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 class TranslationApp:
     def __init__(self, root):
         self.root = root
         self.root.title("")
         self.root = root
         self.root.title('Ghost Manga UI v3.0')
-        # self.root.iconbitmap("C:\\Translate-image-manga-In-Page\\177005_cdisplay_manga_icon.ico")
+        # icon_path = resource_path('177005_cdisplay_manga_icon.ico')
+        # self.root.iconbitmap(icon_path)
 
         style = ttk.Style()
         self.root.geometry("700x700")
