@@ -224,9 +224,15 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
 
         with SB(uc=True, test=False, rtf=True, headless=False, page_load_strategy="eager") as sb_main:
             sb_main.open(page_url)
-            time.sleep(10)
-            sb_main.execute_script("window.stop();")
-            remove_lazy_scripts_and_force_src(sb_main)
+            lazy_scripts = sb_main.find_elements('script[src*="lazy"]')
+            lazy_images = sb_main.find_elements('img[data-src]')
+            
+            if lazy_scripts or lazy_images:
+                time.sleep(10)
+                sb_main.execute_script("window.stop();")
+                remove_lazy_scripts_and_force_src(sb_main)
+            else:
+                logging.info("No lazy scripts and no img[data-src]. Skipping removal.")
             logging.info(f"Main Browser: Opened {page_url}")
 
             current_url = sb_main.get_current_url()
@@ -271,9 +277,15 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
 
                     if new_url != current_url or current_navigation_start != last_navigation_start:
                         if new_url != current_url:
-                            time.sleep(10)
-                            sb_main.execute_script("window.stop();")
-                            remove_lazy_scripts_and_force_src(sb_main)
+                            lazy_scripts = sb_main.find_elements('script[src*="lazy"]')
+                            lazy_images = sb_main.find_elements('img[data-src]')
+                            
+                            if lazy_scripts or lazy_images:
+                                time.sleep(10)
+                                sb_main.execute_script("window.stop();")
+                                remove_lazy_scripts_and_force_src(sb_main)
+                            else:
+                                logging.info("No lazy scripts and no img[data-src]. Skipping removal.")
                             logging.info(f"Main Browser: URL changed to {new_url}")
                         else:
                             logging.info("Main Browser: Page reloaded")
