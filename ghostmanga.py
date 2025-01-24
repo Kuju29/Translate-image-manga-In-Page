@@ -2,10 +2,10 @@ import threading, requests, base64, os, logging, sys, queue, time
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
-from tkinter import scrolledtext
-from tkinter import PhotoImage
+from tkinter import scrolledtext, PhotoImage
 from selenium.webdriver.common.by import By
 from seleniumbase import SB
+from urllib.parse import urlparse
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -191,6 +191,25 @@ class TranslationApp:
         def flush(self):
             pass
 
+def remove_lazy_scripts_and_force_src(sb):
+    lazy_scripts = sb.find_elements('script[src*="lazy"]')
+    for sc in lazy_scripts:
+        sb.execute_script("arguments[0].remove();", sc)
+
+    sb.execute_script("""
+        const lazyImgs = document.querySelectorAll('img[data-src]');
+        lazyImgs.forEach(img => {
+
+            img.removeAttribute('loading');
+            img.classList.remove('lazyload','lazy','lazyloaded');
+
+            if (img.dataset.src) {
+                img.src = img.dataset.src;
+            }
+        });
+    """)
+    logging.info("Removed lazy load scripts and forced src=data-src.")
+
 def run_translation(page_url, selector='img', lang='en', num_translators=4, headless=True, download_image=False, stop_event=None, translation_tasks=None, translation_results=None, translator_threads=None, app=None):
     if stop_event is None:
         stop_event = threading.Event()
@@ -203,8 +222,9 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
         if translator_threads is None:
             translator_threads = []
 
-        with SB(uc=True, test=False, rtf=True, headless=False) as sb_main:
+        with SB(uc=True, test=False, rtf=True, headless=False, page_load_strategy="none") as sb_main:
             sb_main.open(page_url)
+            remove_lazy_scripts_and_force_src(sb_main)
             logging.info(f"Main Browser: Opened {page_url}")
 
             current_url = sb_main.get_current_url()
@@ -224,7 +244,8 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
                             headless=headless,
                             download_image=download_image,
                             stop_event=stop_event,
-                            app=app
+                            app=app,
+                            page_url=page_url
                         )
                         translator.start()
                         translator_threads.append(translator)
@@ -248,6 +269,7 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
 
                     if new_url != current_url or current_navigation_start != last_navigation_start:
                         if new_url != current_url:
+                            remove_lazy_scripts_and_force_src(sb_main)
                             logging.info(f"Main Browser: URL changed to {new_url}")
                         else:
                             logging.info("Main Browser: Page reloaded")
@@ -334,7 +356,7 @@ def process_page(sb_main, current_url, selector, translation_tasks, translation_
 
 
 class TranslatorThread(threading.Thread):
-    def __init__(self, translation_tasks, translation_results, lang='en', headless=True, download_image=False, stop_event=None, app=None):
+    def __init__(self, translation_tasks, translation_results, lang='en', headless=True, download_image=False, stop_event=None, app=None, page_url=None):
         super().__init__()
         self.translation_tasks = translation_tasks
         self.translation_results = translation_results
@@ -344,6 +366,7 @@ class TranslatorThread(threading.Thread):
         self.daemon = True
         self.stop_event = stop_event or threading.Event()
         self.app = app
+        self.page_url = page_url
 
     def run(self):
         with SB(uc=True, test=False, rtf=True, headless=self.headless) as sb_translate:
@@ -366,8 +389,8 @@ class TranslatorThread(threading.Thread):
                     image_index = task['image_index']
                     logging.info(f"Translator: Translating image {image_index} - {image_url}")
 
-                    base64_image = download_image_as_base64(
-                        sb_translate, image_url)
+                    base64_image = download_image_as_base64(sb_translate, image_url, self.page_url)
+
                     if base64_image:
                         drag_and_drop_file(
                             sb_translate,
@@ -412,27 +435,40 @@ class TranslatorThread(threading.Thread):
             finally:
                 pass
 
-
-def download_image_as_base64(sb_translate, image_url):
+def download_image_as_base64(sb_translate, image_url, referer_url=None):
     try:
-        response = requests.get(image_url)
+        if referer_url:
+            parsed_uri = urlparse(referer_url)
+            referer = referer_url
+        else:
+            referer = ""
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/98.0.4758.102 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.8",
+            "Referer": referer
+        }
+
+        response = requests.get(image_url, headers=headers)
         response.raise_for_status()
+
         return base64.b64encode(response.content).decode('utf-8')
+
     except Exception as e:
         logging.info(f"Translator: Failed to download image from {image_url}: {e}")
         try:
             logging.info(f"Translator: Attempting to capture screenshot from {image_url}")
             sb_translate.driver.get(image_url)
-            image_element = sb_translate.driver.find_element(
-                By.TAG_NAME, 'img')
-            sb_translate.driver.execute_script(
-                "arguments[0].scrollIntoView();", image_element)
+            image_element = sb_translate.driver.find_element(By.TAG_NAME, 'img')
+            sb_translate.driver.execute_script("arguments[0].scrollIntoView();", image_element)
             image_base64 = image_element.screenshot_as_base64
-            sb_translate.open(
-                f'https://translate.google.com/?sl=auto&tl=en&op=images')
+
+            sb_translate.open(f'https://translate.google.com/?sl=auto&tl=en&op=images')
             return image_base64
-        except Exception as e:
-            logging.error(f"Translator: Failed to capture screenshot from {image_url}: {e}")
+        except Exception as e2:
+            logging.error(f"Translator: Failed to capture screenshot from {image_url}: {e2}")
             return None
 
 
