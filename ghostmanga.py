@@ -25,7 +25,7 @@ class TranslationApp:
         self.root = root
         self.root.title("")
         self.root = root
-        self.root.title('Ghost Manga UI v3.0')
+        self.root.title('Ghost Manga UI v3.1')
         # icon_path = resource_path('177005_cdisplay_manga_icon.ico')
         # self.root.iconbitmap(icon_path)
 
