@@ -222,7 +222,7 @@ def run_translation(page_url, selector='img', lang='en', num_translators=4, head
         if translator_threads is None:
             translator_threads = []
 
-        with SB(uc=True, test=False, rtf=True, headless=False, page_load_strategy="none") as sb_main:
+        with SB(uc=True, test=False, rtf=True, headless=False, page_load_strategy="eager") as sb_main:
             sb_main.open(page_url)
             remove_lazy_scripts_and_force_src(sb_main)
             logging.info(f"Main Browser: Opened {page_url}")
