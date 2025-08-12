@@ -1,4 +1,4 @@
-# Translate Images in Manga In-Page "Extension" and "Program"
+# Translate Images in Manga In-Page "[Extension](https://github.com/Kuju29/Translate-image-manga-In-Page/tree/v3.1)" and "Program"
 
 ### [Watch the Demo](https://youtu.be/EVLBudGqJ9k)
 
