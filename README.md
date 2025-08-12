@@ -26,7 +26,7 @@ This Chrome extension finds the URLs of images on a page using a specified class
 
 ## Download & Setup
 
-1. [Download the extension](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/refs/heads/main.zip)
+1. [Download the extension](https://github.com/Kuju29/Translate-image-manga-In-Page/archive/66cc4fceb87e7abcf3abae7f3abfbbfb48905bee.zip)
 2. Unzip the downloaded file: `Translate-image-manga-In-Page-main.zip`
 ---
 
