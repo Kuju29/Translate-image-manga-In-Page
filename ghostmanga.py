@@ -1,555 +1,421 @@
-import threading, requests, base64, os, logging, sys, queue, time
+import os, sys, time, base64, asyncio, logging, threading, queue, subprocess
+from dataclasses import dataclass, field
+from typing import Dict, Tuple, Set, Optional, List
+from collections import defaultdict
+
+import tkinter as tk
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
-from tkinter import scrolledtext, PhotoImage
-from selenium.webdriver.common.by import By
+from tkinter import scrolledtext, filedialog as tkfiledialog
+
+import tempfile, atexit, shutil
+
+try:
+    sys.dont_write_bytecode = True
+    os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+except Exception:
+    pass
+
+def _use_private_workdir():
+    tmp = tempfile.mkdtemp(prefix="ghostui_runtime_")
+    try:
+        os.environ.setdefault("PYTHONPYCACHEPREFIX", os.path.join(tmp, "__pycache__"))
+    except Exception:
+        pass
+    atexit.register(lambda: shutil.rmtree(tmp, ignore_errors=True))
+    try:
+        os.chdir(tmp)
+    except Exception:
+        pass
+    return tmp
+
+def resource_path(name: str) -> str:
+    try:
+        base = getattr(sys, "_MEIPASS")
+        return os.path.join(base, name)
+    except Exception:
+        base = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.path.dirname(os.path.abspath(sys.argv[0]))
+        return os.path.join(base, name)
+if getattr(sys, "frozen", False):
+    _use_private_workdir()
+
 from seleniumbase import SB
-from urllib.parse import urlparse
+from lens_images_core import translate_lens
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+LOG = logging.getLogger("ghostui")
+if not LOG.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+LOG.propagate = False
 
-downloaded_files_dir = 'downloaded_files'
-os.makedirs(downloaded_files_dir, exist_ok=True)
+DATA_URL_PREFIX = "data:image/"
+CONCURRENCY, TIMEOUT, POLL_MS, IDLE = 3, 20.0, 150, 0.12
 
-def resource_path(relative_path):
+JS_GUARD = r"""
+(function(){
+  const isT = img => img.getAttribute('data-ghost-translated')==='1';
+  document.querySelectorAll('img').forEach(img=>{ if(isT(img)) return;
+    try{ img.setAttribute('loading','eager'); img.classList.remove('lazyload','lazy','lazyloaded'); }catch(e){} });
+  const attrs=['data-src','data-original','data-lazy','data-lazy-src','data-url','data-srcset'];
+  document.querySelectorAll('img').forEach(img=>{ if(isT(img)) return;
+    try{
+      let v=null;
+      for(const a of attrs){ const t=img.getAttribute(a); if(t&&t.trim()){ v=t.trim(); break; } }
+      if(!v && img.srcset){ const p=img.srcset.split(',').map(s=>s.trim()); if(p.length){ v=p[p.length-1].split(' ')[0]; } }
+      if(v) img.src=v;
+    }catch(e){}
+  });
+  try{ window.scrollBy(0,1); window.scrollBy(0,-1);}catch(e){}
+  if(!window.__ghost_guard){ window.__ghost_guard=true;
+    const OBS=new MutationObserver(L=>{ for(const m of L){ if(m.type==='attributes' && m.attributeName==='src'){
+      const im=m.target; try{ if(im instanceof HTMLImageElement && isT(im)){
+        const lock=im.getAttribute('data-ghost-translated-src')||''; if(lock && im.src && !im.src.startsWith('data:')) im.src=lock;
+      }}catch(e){} } } });
+    document.querySelectorAll('img').forEach(im=>{ try{ OBS.observe(im,{attributes:true,attributeFilter:['src']}); }catch(e){} });
+    const DOCO=new MutationObserver(L=>{ for(const r of L){ r.addedNodes && r.addedNodes.forEach(n=>{
+      if(n && n.querySelectorAll){ n.querySelectorAll('img').forEach(im=>{ try{ OBS.observe(im,{attributes:true,attributeFilter:['src']}); }catch(e){} }); }
+    }); } });
+    try{ DOCO.observe(document.documentElement||document.body,{childList:true,subtree:true}); }catch(e){}
+  }
+  return true;
+})();
+"""
+
+JS_TAG = r"""
+const imgs=[...document.querySelectorAll('img')]; let seq=1, out=[];
+for(const img of imgs){
+  if(img.getAttribute('data-ghost-translated')==='1') continue;
+  const s=img.currentSrc||img.src||''; if(!s||s.startsWith('data:')) continue;
+  const L=s.toLowerCase(); if(L.endsWith('.svg')||L.endsWith('.gif')||L.endsWith('.avif')||L.endsWith('.ico')) continue;
+  if(!img.getAttribute('data-ghost-id')) img.setAttribute('data-ghost-id',''+(seq++));
+  out.push({id:img.getAttribute('data-ghost-id'),src:s});
+}
+return out;
+"""
+
+JS_APPLY = r"""
+const id=arguments[0], payload=arguments[1];
+const img=document.querySelector('img[data-ghost-id="'+id+'"]'); if(!img) return false;
+if(img.getAttribute("data-ghost-translated")==="1" && img.getAttribute("data-ghost-translated-src")===payload) return true;
+if(!img.getAttribute("data-ghost-original-src")) img.setAttribute("data-ghost-original-src", img.src||"");
+img.src=payload; img.setAttribute("data-ghost-translated","1"); img.setAttribute("data-ghost-translated-src",payload); return true;
+"""
+
+JS_GET_VISIBLE_TRANSLATED = r"""
+const out=[];
+document.querySelectorAll('img[data-ghost-translated="1"]').forEach(img=>{
+  const r=img.getBoundingClientRect(), cs=getComputedStyle(img);
+  if(r.width>0 && r.height>0 && cs.visibility!=='hidden' && cs.display!=='none'){
+    out.push({id: img.getAttribute('data-ghost-id')||'', data: img.getAttribute('data-ghost-translated-src')||img.src||''});
+  }
+});
+return out;
+"""
+
+def save_data_url_to(data_url: str, folder: str, key_hint: str):
     try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-class TranslationApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("")
-        self.root = root
-        self.root.title('Ghost Manga UI v3.1')
-        # icon_path = resource_path('177005_cdisplay_manga_icon.ico')
-        # self.root.iconbitmap(icon_path)
-
-        style = ttk.Style()
-        self.root.geometry("700x700")
-        self.root.resizable(False, False)
-
-        self.translation_thread = None
-        self.translator_threads = []
-        self.stop_event = threading.Event()
-        self.translation_tasks = queue.Queue()
-        self.translation_results = queue.Queue()
-        self.total_images = 0
-        self.processed_images = 0
-
-        self.create_widgets()
-
-    def create_widgets(self):
-
-        self.main_frame = ttk.Frame(self.root, padding=20)
-        self.main_frame.grid(row=0, column=0, sticky="nsew")
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-
-        self.main_frame.columnconfigure(0, weight=1)
-
-        input_frame = ttk.Frame(self.main_frame)
-        input_frame.grid(row=0, column=0, sticky="ew", pady=(0,10))
-        input_frame.columnconfigure(0, weight=1) 
-
-        self.url_label = ttk.Label(input_frame, text="Page URL:")
-        self.url_label.grid(row=0, column=0, sticky=W, pady=5)
-        self.url_entry = ttk.Entry(input_frame)
-        self.url_entry.grid(row=1, column=0, sticky=EW, pady=5) 
-
-        self.lang_label = ttk.Label(input_frame, text="Target Language (e.g., 'en' for English, 'th' for Thai):")
-        self.lang_label.grid(row=2, column=0, sticky=W, pady=5)
-        self.lang_entry = ttk.Entry(input_frame)
-        self.lang_entry.insert(0, 'th')
-        self.lang_entry.grid(row=3, column=0, sticky=EW, pady=5) 
-
-        self.selector_label = ttk.Label(input_frame, text="CSS Selector for Images (optional):")
-        self.selector_label.grid(row=4, column=0, sticky=W, pady=5)
-        self.selector_entry = ttk.Entry(input_frame)
-        self.selector_entry.insert(0, 'img')
-        self.selector_entry.grid(row=5, column=0, sticky=EW, pady=5) 
-
-        self.num_translators_label = ttk.Label(input_frame, text="Number of Translators (default 2):")
-        self.num_translators_label.grid(row=6, column=0, sticky=W, pady=5)
-        self.num_translators_spinbox = ttk.Spinbox(input_frame, from_=1, to=10, width=5)
-        self.num_translators_spinbox.set(2)
-        self.num_translators_spinbox.grid(row=7, column=0, sticky=W, pady=5) 
-
-        options_frame = ttk.Frame(self.main_frame)
-        options_frame.grid(row=1, column=0, sticky="ew", pady=(0,10))
-        options_frame.columnconfigure(0, weight=1) 
-
-        self.headless_var = ttk.BooleanVar(value=True)
-        self.headless_check = ttk.Checkbutton(options_frame, text="Run translators in headless mode", variable=self.headless_var)
-        self.headless_check.grid(row=0, column=0, sticky=W) 
-
-        self.download_var = ttk.BooleanVar(value=False)
-        self.download_check = ttk.Checkbutton(options_frame, text="Download translated images", variable=self.download_var)
-        self.download_check.grid(row=1, column=0, sticky=W) 
-
-        buttons_frame = ttk.Frame(self.main_frame)
-        buttons_frame.grid(row=3, column=0, pady=(0,10))
-        buttons_frame.columnconfigure(0, weight=1)
-        buttons_frame.columnconfigure(1, weight=0)
-        buttons_frame.columnconfigure(2, weight=0)
-        buttons_frame.columnconfigure(3, weight=1)
-
-        self.start_button = ttk.Button(buttons_frame, text="Start Translation", bootstyle=SUCCESS, command=self.start_translation)
-        self.start_button.grid(row=0, column=1, padx=5)
-
-        self.stop_button = ttk.Button(buttons_frame, text="Stop Translation", bootstyle=DANGER, command=self.stop_translation)
-        self.stop_button.grid(row=0, column=2, padx=5)
-        self.stop_button.config(state='disabled') 
-
-        self.log_text = scrolledtext.ScrolledText(self.main_frame, state='disabled', height=15)
-        self.log_text.grid(row=4, column=0, sticky="nsew")
-        self.main_frame.rowconfigure(4, weight=1)
-
-    def start_translation(self):
-        page_url = self.url_entry.get()
-        lang = self.lang_entry.get()
-        selector = self.selector_entry.get()
-        num_translators = int(self.num_translators_spinbox.get())
-        headless = self.headless_var.get()
-        download_image = self.download_var.get()
-
-        if not page_url:
-            Messagebox.show_error("Please enter a valid URL.", "Error")
-            return
-
-        self.start_button.config(state='disabled')
-        self.stop_button.config(state='normal')
-
-        self.translation_thread = threading.Thread(
-            target=self.run_translation,
-            args=(page_url, selector, lang,
-                  num_translators, headless, download_image)
-        )
-        self.translation_thread.start()
-
-    def stop_translation(self):
-        if self.stop_event:
-            self.stop_event.set()
-            logging.info("Stopping translation threads...")
-            for translator in self.translator_threads:
-                translator.join()
-            logging.info("Translator threads stopped.")
-        self.start_button.config(state='normal')
-        self.stop_button.config(state='disabled')
-
-    def run_translation(self, page_url, selector, lang, num_translators, headless, download_image):
-        self.stop_event = threading.Event()
-        try:
-
-            logger = logging.getLogger()
-            logger.handlers = []
-            handler = logging.StreamHandler(self.LogHandler(self.log_text))
-            handler.setFormatter(logging.Formatter(
-                '%(asctime)s - %(levelname)s - %(message)s'))
-            logger.addHandler(handler) 
-
-            self.translation_tasks = queue.Queue()
-            self.translation_results = queue.Queue()
-            self.total_images = 0
-            self.processed_images = 0
-            self.stop_event.clear()
-
-            run_translation(
-                page_url=page_url,
-                selector=selector,
-                lang=lang,
-                num_translators=num_translators,
-                headless=headless,
-                download_image=download_image,
-                stop_event=self.stop_event,
-                translation_tasks=self.translation_tasks,
-                translation_results=self.translation_results,
-                translator_threads=self.translator_threads,
-                app=self
-            )
-
-        except Exception as e:
-            logging.error(f"An error occurred: {e}")
-        finally:
-            self.start_button.config(state='normal')
-            self.stop_button.config(state='disabled')
-
-    class LogHandler:
-        def __init__(self, text_widget):
-            self.text_widget = text_widget
-
-        def write(self, message):
-            self.text_widget.configure(state='normal')
-            self.text_widget.insert('end', message)
-            self.text_widget.configure(state='disabled')
-            self.text_widget.see('end')
-
-        def flush(self):
-            pass
-
-def remove_lazy_scripts_and_force_src(sb):
-    lazy_scripts = sb.find_elements('script[src*="lazy"]')
-    for sc in lazy_scripts:
-        sb.execute_script("arguments[0].remove();", sc)
-
-    sb.execute_script("""
-        const lazyImgs = document.querySelectorAll('img[data-src]');
-        lazyImgs.forEach(img => {
-
-            img.removeAttribute('loading');
-            img.classList.remove('lazyload','lazy','lazyloaded');
-
-            if (img.dataset.src) {
-                img.src = img.dataset.src;
-            }
-        });
-    """)
-    logging.info("Removed lazy load scripts and forced src=data-src.")
-
-def run_translation(page_url, selector='img', lang='en', num_translators=4, headless=True, download_image=False, stop_event=None, translation_tasks=None, translation_results=None, translator_threads=None, app=None):
-    if stop_event is None:
-        stop_event = threading.Event()
-    try:
-
-        if translation_tasks is None:
-            translation_tasks = queue.Queue()
-        if translation_results is None:
-            translation_results = queue.Queue()
-        if translator_threads is None:
-            translator_threads = []
-
-        with SB(uc=True, test=False, rtf=True, headless=False, page_load_strategy="eager") as sb_main:
-            sb_main.open(page_url)
-            lazy_scripts = sb_main.find_elements('script[src*="lazy"]')
-            
-            if lazy_scripts:
-                time.sleep(10)
-                sb_main.execute_script("window.stop();")
-                remove_lazy_scripts_and_force_src(sb_main)
-            else:
-                logging.info("No lazy scripts and no img[data-src]. Skipping removal.")
-            logging.info(f"Main Browser: Opened {page_url}")
-
-            current_url = sb_main.get_current_url()
-            last_url = current_url
-
-            last_navigation_start = sb_main.execute_script("return window.performance.timing.navigationStart;")
-
-            while not stop_event.is_set():
-                logging.info(f"Main Browser: Processing URL {current_url}")
-
-                if not translator_threads:
-                    for i in range(num_translators):
-                        translator = TranslatorThread(
-                            translation_tasks=translation_tasks,
-                            translation_results=translation_results,
-                            lang=lang,
-                            headless=headless,
-                            download_image=download_image,
-                            stop_event=stop_event,
-                            app=app,
-                            page_url=page_url
-                        )
-                        translator.start()
-                        translator_threads.append(translator)
-                        logging.info(f"Started Translator Thread {i+1}")
-
-                process_page(
-                    sb_main=sb_main,
-                    current_url=current_url,
-                    selector=selector,
-                    translation_tasks=translation_tasks,
-                    translation_results=translation_results,
-                    download_image=download_image,
-                    app=app
-                )
-
-                while True:
-                    time.sleep(2)
-                    new_url = sb_main.get_current_url()
-
-                    current_navigation_start = sb_main.execute_script("return window.performance.timing.navigationStart;")
-
-                    if new_url != current_url or current_navigation_start != last_navigation_start:
-                        if new_url != current_url:
-                            lazy_scripts = sb_main.find_elements('script[src*="lazy"]')
-                            
-                            if lazy_scripts:
-                                time.sleep(10)
-                                sb_main.execute_script("window.stop();")
-                                remove_lazy_scripts_and_force_src(sb_main)
-                            else:
-                                logging.info("No lazy scripts and no img[data-src]. Skipping removal.")
-                            logging.info(f"Main Browser: URL changed to {new_url}")
-                        else:
-                            logging.info("Main Browser: Page reloaded")
-
-                        current_url = new_url
-                        last_navigation_start = current_navigation_start
-
-                        stop_event.set()
-                        for translator in translator_threads:
-                            translator.join()
-                        logging.info("Translator threads stopped due to URL change or page reload.")
-
-                        translation_tasks.queue.clear()
-                        translation_results.queue.clear()
-                        app.translator_threads = []
-                        app.stop_event.clear()
-                        app.total_images = 0
-                        app.processed_images = 0
-
-                        translator_threads = []
-                        break
-
-                    while not translation_results.empty():
-                        result = translation_results.get()
-                        image_url = result['image_url']
-                        translated_image_data = result['translated_image_data']
-
-                        images = sb_main.find_elements(selector)
-                        for img in images:
-                            src = img.get_attribute("src")
-                            if src == image_url:
-                                sb_main.execute_script(
-                                    "arguments[0].src = arguments[1];", img, translated_image_data)
-                                logging.info(
-                                    f"Main Browser: Replaced image {image_url} with translated image")
-                                app.processed_images += 1
-                                break
-
-                        if app.processed_images >= app.total_images:
-                            logging.info("All images have been processed. Stopping translator threads.")
-                            stop_event.set()
-                            for translator in translator_threads:
-                                translator.join()
-                            logging.info("Translator threads stopped.")
-                            translator_threads.clear()
-                            break
-
-    except Exception as e:
-        logging.error(f"Error in run_translation: {e}")
-        stop_event.set()
-
-
-def process_page(sb_main, current_url, selector, translation_tasks, translation_results, download_image, app=None):
-    try:
-        images = sb_main.find_elements(selector)
-        if not images:
-            logging.warning("Main Browser: No images found on the page.")
-            return
-
-        image_urls = [
-            img.get_attribute("src")
-            for img in images
-            if img.get_attribute("src") and img.get_attribute("src").split('?')[0].lower().endswith((".jpg", ".png", ".jpeg", ".webp"))
-        ]
-        logging.info(f"Main Browser: Found {len(image_urls)} images on the page") 
-
-        if app:
-            app.total_images = len(image_urls)
-            app.processed_images = 0
-
-        for index, image_url in enumerate(image_urls, start=1):
-            task = {
-                'image_url': image_url,
-                'image_index': index
-            }
-            if task not in translation_tasks.queue:
-                translation_tasks.put(task)
-                logging.info(f"Main Browser: Queued image {index}: {image_url} for translation")
-            else:
-                logging.info(f"Main Browser: Image {image_url} is already in the queue")
-
-    except Exception as e:
-        logging.error(f"Error in process_page: {e}")
-
-
-class TranslatorThread(threading.Thread):
-    def __init__(self, translation_tasks, translation_results, lang='en', headless=True, download_image=False, stop_event=None, app=None, page_url=None):
-        super().__init__()
-        self.translation_tasks = translation_tasks
-        self.translation_results = translation_results
-        self.lang = lang
-        self.headless = headless
-        self.download_image = download_image
-        self.daemon = True
-        self.stop_event = stop_event or threading.Event()
-        self.app = app
-        self.page_url = page_url
-
-    def run(self):
-        with SB(uc=True, test=False, rtf=True, headless=self.headless) as sb_translate:
-            try:
-                sb_translate.open(
-                    f'https://translate.google.com/?sl=auto&tl={self.lang}&op=images')
-                logging.info("Translator: Opened Google Translate Images page")
-
-                while not self.stop_event.is_set():
-                    if self.app.processed_images >= self.app.total_images:
-                        logging.info("Translator: All images processed, exiting.")
-                        break
-
-                    try:
-                        task = self.translation_tasks.get(timeout=1)
-                    except queue.Empty:
-                        continue
-
-                    image_url = task['image_url']
-                    image_index = task['image_index']
-                    logging.info(f"Translator: Translating image {image_index} - {image_url}")
-
-                    base64_image = download_image_as_base64(sb_translate, image_url, self.page_url)
-
-                    if base64_image:
-                        drag_and_drop_file(
-                            sb_translate,
-                            'input[type="file"][accept="image/jpeg, image/png, .jpeg, .jpg, .png"]',
-                            base64_image
-                        )
-                        sb_translate.sleep(2)
-
-                        try:
-                            translated_image = sb_translate.wait_for_element_visible(
-                                '.CMhTbb.tyW0pd img', timeout=15)
-                            translated_image_blob_url = translated_image.get_attribute(
-                                "src")
-                            logging.info(f"Translator: Retrieved translated Blob URL: {translated_image_blob_url}")
-                        except Exception as e:
-                            logging.error(f"Translator: Translated image not found: {e}")
-                            clear_image(sb_translate)
-                            continue
-
-                        base64_translated_image = download_blob_image(
-                            sb_translate,
-                            translated_image_blob_url,
-                            image_index,
-                            self.download_image
-                        )
-                        if base64_translated_image:
-                            translated_image_data = f"data:image/jpeg;base64,{base64_translated_image}"
-
-                            result = {
-                                'image_url': image_url,
-                                'translated_image_data': translated_image_data
-                            }
-                            self.translation_results.put(result)
-                            logging.info(f"Translator: Completed translation for image {image_url}")
-
-                        clear_image(sb_translate)
-                    else:
-                        logging.error(f"Translator: Failed to download image {image_url}")
-
-            except Exception as e:
-                logging.error(f"Translator: Unexpected error: {e}")
-            finally:
-                pass
-
-def download_image_as_base64(sb_translate, image_url, referer_url=None):
-    try:
-        if referer_url:
-            parsed_uri = urlparse(referer_url)
-            referer = referer_url
-        else:
-            referer = ""
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/98.0.4758.102 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.8",
-            "Referer": referer
-        }
-
-        response = requests.get(image_url, headers=headers)
-        response.raise_for_status()
-
-        return base64.b64encode(response.content).decode('utf-8')
-
-    except Exception as e:
-        logging.info(f"Translator: Failed to download image from {image_url}: {e}")
-        try:
-            logging.info(f"Translator: Attempting to capture screenshot from {image_url}")
-            sb_translate.driver.get(image_url)
-            image_element = sb_translate.driver.find_element(By.TAG_NAME, 'img')
-            sb_translate.driver.execute_script("arguments[0].scrollIntoView();", image_element)
-            image_base64 = image_element.screenshot_as_base64
-
-            sb_translate.open(f'https://translate.google.com/?sl=auto&tl=en&op=images')
-            return image_base64
-        except Exception as e2:
-            logging.error(f"Translator: Failed to capture screenshot from {image_url}: {e2}")
-            return None
-
-
-def drag_and_drop_file(sb_translate, file_input_selector, base64_image):
-    try:
-        sb_translate.execute_script("""
-            var fileInput = document.querySelector(arguments[0]);
-            var base64Image = arguments[1];
-            var byteCharacters = atob(base64Image);
-            var byteNumbers = new Array(byteCharacters.length);
-            for (var i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            var byteArray = new Uint8Array(byteNumbers);
-            var file = new File([byteArray], 'file.jpg', { type: 'image/jpeg' });
-            var dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            fileInput.files = dataTransfer.files;
-            fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        """, file_input_selector, base64_image)
-        logging.info("Translator: Simulated drag and drop of the image")
-    except Exception as e:
-        logging.error(f"Translator: Error during drag and drop: {e}")
-
-
-def download_blob_image(sb_translate, blob_url, index, download_image):
-    try:
-        image_data = sb_translate.execute_script("""
-            return fetch(arguments[0])
-                .then(response => response.blob())
-                .then(blob => {
-                    return new Promise((resolve, reject) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    });
-                });
-        """, blob_url)
-
-        if image_data:
-            base64_image = image_data.split(',')[1]
-            if download_image:
-                folder_path = 'downloaded_files'
-                os.makedirs(folder_path, exist_ok=True)
-                file_path = os.path.join(folder_path, f'image_{index}.jpg')
-                with open(file_path, 'wb') as f:
-                    f.write(base64.b64decode(base64_image))
-                logging.info(f"Translator: Downloaded translated image to {file_path}")
-            return base64_image
-        else:
-            logging.info("Translator: Failed to fetch image data from Blob URL")
-            return None
-    except Exception as e:
-        logging.error(f"Translator: Error downloading Blob image from {blob_url}: {e}")
+        if not data_url.startswith(DATA_URL_PREFIX): return None
+        head, b64 = data_url.split(',',1); ext='jpg' if ('jpeg' in head or 'jpg' in head) else 'png'
+        safe=''.join(c for c in key_hint if c.isalnum() or c in '-_')[:40]; ts=int(time.time()*1000)
+        fp=os.path.join(folder,f"{safe or 'image'}_{ts}.{ext}")
+        with open(fp,'wb') as f: f.write(base64.b64decode(b64))
+        return fp
+    except Exception as e: 
+        LOG.error("save err: %s",e); 
         return None
 
-
-def clear_image(sb_translate):
+def hide_path(path: str):
     try:
-        clear_button_selector = 'button.VfPpkd-Bz112c-LgbsSe.yHy1rc.eT1oJ.mN1ivc.B0czFe'
-        sb_translate.wait_for_element_visible(clear_button_selector, timeout=5)
-        sb_translate.click(clear_button_selector)
-    except Exception as e:
-        logging.error(f"Translator: Error clearing image: {e}")
+        if not os.path.exists(path): return
+        if os.name == "nt":
+            import ctypes
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+        elif sys.platform == "darwin":
+            subprocess.run(["chflags", "hidden", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            base = os.path.dirname(path) or "."
+            name = os.path.basename(path)
+            hidden_file = os.path.join(base, ".hidden")
+            try:
+                lines: List[str] = []
+                if os.path.exists(hidden_file):
+                    with open(hidden_file, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = [ln.strip() for ln in f.readlines() if ln.strip()]
+                if name not in lines:
+                    lines.append(name)
+                    with open(hidden_file, "w", encoding="utf-8") as f:
+                        f.write("\n".join(lines) + "\n")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-if __name__ == "__main__":
-    root = ttk.Window(themename='superhero')
-    app = TranslationApp(root)
+def hide_common_dirs(base_dir: str):
+    for dn in ("__pycache__", "downloaded_files"):
+        hide_path(os.path.join(base_dir, dn))
+
+class Proc:
+    def __init__(self, lang:str): 
+        self.lang=lang; self.cache:Dict[Tuple[str,str],str]={}; self.qres=queue.Queue()
+        self.stop=threading.Event(); self.th=None; self.ready=threading.Event()
+    def start(self): self.th=threading.Thread(target=self._run,daemon=True); self.th.start(); self.ready.wait(3.0)
+    def _run(self): asyncio.run(self._amain())
+    def submit(self, url:str):
+        key=(url,self.lang); 
+        if key in self.cache: return self.cache[key]
+        try: self._qin.put_nowait(key)
+        except Exception: pass
+        return None
+    def poll(self, n=64):
+        out=[]; 
+        for _ in range(n):
+            try: out.append(self.qres.get_nowait())
+            except Exception: break
+        return out
+    def stop_now(self): self.stop.set()
+    async def _amain(self):
+        import asyncio as aio
+        self._qin=aio.Queue(); self.ready.set(); sem=aio.Semaphore(CONCURRENCY)
+        async def one(key):
+            url,lang=key
+            try:
+                res=await aio.wait_for(translate_lens(url,lang=lang),timeout=TIMEOUT)
+                data=(res or {}).get('image') or ''
+                self.cache[key]=data if data.startswith(DATA_URL_PREFIX) else ""
+                self.qres.put((key,self.cache[key]))
+            except Exception:
+                self.cache[key]=""; self.qres.put((key,""))
+        async def worker():
+            while not self.stop.is_set():
+                try: key=await aio.wait_for(self._qin.get(),timeout=0.2)
+                except aio.TimeoutError: await aio.sleep(0.05); continue
+                try:
+                    async with sem: await one(key)
+                finally: self._qin.task_done()
+        ws=[aio.create_task(worker()) for _ in range(CONCURRENCY)]
+        while not self.stop.is_set(): await aio.sleep(0.1)
+        for w in ws: w.cancel(); await aio.gather(*ws, return_exceptions=True)
+
+@dataclass
+class PageState:
+    url:str=""; total:int=0; done:Set[str]=field(default_factory=set); sub_src:Set[str]=field(default_factory=set); map:Dict[str,Set[str]]=field(default_factory=lambda:defaultdict(set))
+
+class UiLogHandler(logging.Handler):
+    def __init__(self, app): super().__init__(); self.app = app
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.app.root.after(0, self.app._log_plain, msg)
+        except Exception:
+            pass
+
+class App:
+    def __init__(self, root):
+        self.root=root; self.root.title("Ghost Manga UI v4.0")
+        base=os.path.dirname(sys.argv[0] or __file__)
+        
+# icons
+        # Ensure taskbar grouping and icon on Windows
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GhostUI")
+            except Exception:
+                pass
+        try:
+            ico = resource_path("icon.ico")
+            if os.path.exists(ico):
+                self.root.iconbitmap(ico)
+        except Exception:
+            pass
+        try:
+            png = resource_path("logo.png")
+            if os.path.exists(png):
+                self.root.iconphoto(True, tk.PhotoImage(file=png))
+        except Exception:
+            pass
+
+
+        self.running=False; self.lang="en"; self.proc=None; self.cache={}
+        self._pending_save_dir: Optional[str] = None
+
+        self._build()
+
+        handler = UiLogHandler(self)
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        handler.setLevel(logging.INFO)
+        LOG.handlers.clear(); LOG.addHandler(handler); LOG.setLevel(logging.INFO); LOG.propagate=False
+
+        for name in ("httpx", "httpcore"):
+            try:
+                lg = logging.getLogger(name)
+                lg.handlers.clear()
+                lg.addHandler(handler)
+                lg.setLevel(logging.INFO)
+                lg.propagate = False
+            except Exception:
+                pass
+
+        self.root.bind_all("<<Paste>>", self._on_global_paste, add="+")
+        self.root.bind_all("<KeyPress>", self._on_any_key_for_paste, add="+")
+
+        self._base_dir = base
+        self._schedule_hide_dirs()
+
+    def _build(self):
+        m=ttk.Frame(self.root,padding=12); m.grid(row=0,column=0,sticky="nsew")
+        self.root.grid_rowconfigure(0,weight=1); self.root.grid_columnconfigure(0,weight=1)
+        r=ttk.Frame(m); r.grid(row=0,column=0,sticky="ew",pady=(0,8)); r.grid_columnconfigure(1,weight=1)
+        ttk.Label(r,text="Page URL").grid(row=0,column=0,padx=(0,8)); self.uvar=ttk.StringVar(value="")
+        self.uentry=ttk.Entry(r,textvariable=self.uvar); self.uentry.grid(row=0,column=1,sticky="ew")
+
+        o=ttk.Labelframe(m,text="Options"); o.grid(row=1,column=0,sticky="ew")
+        ttk.Label(o,text="Target language").grid(row=0,column=0,padx=(4,8),sticky=W)
+        self.lvar=ttk.StringVar(value="en"); ttk.Entry(o,width=10,textvariable=self.lvar).grid(row=0,column=1,sticky=W)
+
+        p=ttk.Labelframe(m,text="Progress"); p.grid(row=2,column=0,sticky="ew",pady=(8,8))
+        self.pb=ttk.Progressbar(p,orient="horizontal",mode="determinate"); self.pb.grid(row=0,column=0,sticky="ew",padx=8,pady=6); p.grid_columnconfigure(0,weight=1)
+        self.pl=ttk.StringVar(value="0 / 0"); ttk.Label(p,textvariable=self.pl).grid(row=0,column=1,padx=8)
+
+        b=ttk.Frame(m); b.grid(row=3,column=0,sticky="ew",pady=(0,8))
+        ttk.Button(b,text="Start",bootstyle=SUCCESS,command=self.start).grid(row=0,column=0,padx=(0,8))
+        ttk.Button(b,text="Stop",bootstyle=DANGER,command=self.stop).grid(row=0,column=1,padx=(0,8))
+        ttk.Button(b,text="Save images as...",bootstyle=SECONDARY,command=self.save_images_as).grid(row=0,column=2)
+
+        self.log=scrolledtext.ScrolledText(m,height=18); self.log.grid(row=4,column=0,sticky="nsew"); m.grid_rowconfigure(4,weight=1)
+
+        try: self.uentry.focus_set()
+        except Exception: pass
+
+    def _log_plain(self,msg):
+        try: self.log.insert("end",msg+"\n"); self.log.see("end")
+        except Exception: pass
+
+    def _prog(self,done,total):
+        self.pb["maximum"]=max(total,1); self.pb["value"]=min(done,total); self.pl.set(f"{done} / {total}")
+
+    def _on_global_paste(self, event):
+        self._paste_clip(); return "break"
+
+    def _on_any_key_for_paste(self, event):
+        try:
+            if getattr(event, "char", "") == "\x16":
+                self._paste_clip()
+                return "break"
+        except Exception:
+            pass
+
+    def _paste_clip(self):
+        try:
+            txt=self.root.clipboard_get()
+            self.uvar.set(txt)
+        except Exception as e:
+            LOG.error(f"Paste failed: {e}")
+
+    def start(self):
+        if self.running: Messagebox.show_info("Already working"); return
+        url=(self.uvar.get() or "").strip(); 
+        if not url: Messagebox.show_error("Please enter the URL first."); return
+        try: self.lang=(self.lvar.get() or "en").strip()
+        except Exception: self.lang="en"
+        self.running=True; self.cache={}
+        self.proc=Proc(self.lang); self.proc.start()
+        LOG.info(f"Start: {url} lang={self.lang}")
+        threading.Thread(target=self._loop,args=(url,),daemon=True).start()
+        self.root.after(POLL_MS,self._poll)
+
+    def stop(self):
+        if not self.running: return
+        self.running=False
+        try: self.proc and self.proc.stop_now()
+        except Exception: pass
+        LOG.info("Stop requested.")
+
+    def save_images_as(self):
+        folder = tkfiledialog.askdirectory(title="Choose folder to save translated images")
+        if not folder: return
+        self._pending_save_dir = folder
+        LOG.info(f"Saving visible translated images to: {folder}")
+
+    def _poll(self):
+        if not self.running or not self.proc: return
+        for (key,data) in self.proc.poll():
+            self.cache[key]=data 
+        self.root.after(POLL_MS,self._poll)
+
+    def _loop(self, start_url:str):
+        try:
+            with SB(uc=True,test=False,rtf=True,headless=False) as sb:
+                sb.open(start_url); time.sleep(1.0)
+                st=PageState(url=sb.driver.current_url); LOG.info(f"Opened: {st.url}")
+                JS_G=JS_GUARD; JS_T=JS_TAG; JS_A=JS_APPLY; JS_S=JS_GET_VISIBLE_TRANSLATED
+                while self.running:
+                    cur=sb.driver.current_url
+                    if cur!=st.url:
+                        st=PageState(url=cur); self._prog(0,0); time.sleep(0.5); LOG.info(f"Navigation → {cur}")
+                    sb.execute_script(JS_G); items=sb.execute_script(JS_T) or []
+                    now=defaultdict(set); [now[it["src"]].add(it["id"]) for it in items]
+                    for s,ids in now.items(): st.map.setdefault(s,set()).update(ids)
+                    now_ids=set().union(*now.values()) if now else set(); known=set().union(*st.map.values()) if st.map else set()
+                    gone=(known-now_ids)-st.done
+                    if gone: st.done.update(gone); LOG.info(f"{len(gone)} image(s) removed; marking as done.")
+                    pending=(set().union(*st.map.values()) if st.map else set())-st.done
+                    st.total=max(st.total,len(pending)+len(st.done)); self._prog(len(st.done),st.total)
+                    if st.total==0: 
+                        if self._pending_save_dir:
+                            self._export_visible(sb, self._pending_save_dir, JS_S)
+                            self._pending_save_dir=None
+                        time.sleep(IDLE); continue
+                    for s,ids in list(st.map.items()):
+                        cached=self.cache.get((s,self.lang),None); 
+                        if cached is None: continue
+                        if cached=="":
+                            for gid in list(ids):
+                                if gid in st.done: continue
+                                st.done.add(gid)
+                            continue
+                        if not cached.startswith(DATA_URL_PREFIX): continue
+                        for gid in list(ids):
+                            if gid in st.done: continue
+                            if sb.execute_script(JS_A,gid,cached):
+                                st.done.add(gid)
+                    self._prog(len(st.done),st.total)
+                    for s in st.map.keys():
+                        if s in st.sub_src: continue
+                        if self.cache.get((s,self.lang),None) is None and self.proc: self.proc.submit(s)
+                        st.sub_src.add(s)
+                    if self._pending_save_dir:
+                        self._export_visible(sb, self._pending_save_dir, JS_S)
+                        self._pending_save_dir=None
+                    time.sleep(IDLE)
+                LOG.info("Finished.")
+        except Exception as e:
+            LOG.error(f"Browser error: {e}")
+
+    def _export_visible(self, sb, folder: str, js_get):
+        try:
+            items = sb.execute_script(js_get) or []
+            if not items:
+                LOG.info("No visible translated images to save right now.")
+                return
+            n=0
+            for it in items:
+                fp = save_data_url_to(it.get("data",""), folder, f"id-{it.get('id','')}")
+                if fp: n+=1
+            LOG.info(f"Saved {n} image(s) to: {folder}")
+        except Exception as e:
+            LOG.error(f"Save failed: {e}")
+
+    def _schedule_hide_dirs(self):
+        try:
+            hide_common_dirs(self._base_dir)
+        finally:
+            self.root.after(2000, self._schedule_hide_dirs)
+
+def main():
+    root=ttk.Window(themename="superhero")
+    app=App(root)
     root.mainloop()
+
+if __name__=="__main__": main()
