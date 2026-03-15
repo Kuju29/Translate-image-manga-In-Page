@@ -1,3 +1,5 @@
+[![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-pink?logo=githubsponsors)](https://github.com/sponsors/Kuju29)
+
 # Translate Images in Manga In-Page "[Extension](https://github.com/Kuju29/Translate-image-manga-In-Page/tree/v3.1)" and "Program"
 
 ### [Watch the Demo](https://youtu.be/EVLBudGqJ9k)
